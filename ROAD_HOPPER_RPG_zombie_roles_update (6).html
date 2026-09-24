@@ -1,0 +1,2575 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ROAD HOPPER RPG - BEGINNER'S VILLAGE EDITION</title>
+    <!-- Tailwind CSS for UI Layout -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library for 3D Isometric Graphics -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@700;900&display=swap');
+        
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050814;
+        }
+
+        #game-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .pixel-box {
+            background: rgba(15, 23, 42, 0.95);
+            border: 4px solid #fbbf24;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8), inset 0 0 20px rgba(251, 191, 36, 0.3);
+            border-radius: 1.25rem;
+        }
+
+        .btn-bounce {
+            transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .btn-bounce:hover {
+            transform: scale(1.05);
+        }
+        .btn-bounce:active {
+            transform: scale(0.95);
+        }
+
+        .scanlines {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.4) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.08), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.08));
+            background-size: 100% 4px, 6px 100%;
+            pointer-events: none;
+            display: none;
+            z-index: 40;
+        }
+
+        #parry-overlay {
+            pointer-events: none;
+            transition: opacity 0.08s ease;
+        }
+
+        #flash-overlay {
+            pointer-events: none;
+            transition: opacity 0.15s ease-out;
+        }
+
+        .modal-overlay {
+            background: rgba(5, 8, 20, 0.85);
+            backdrop-filter: blur(8px);
+        }
+
+        /* 3D看板風ラベルUI */
+        .shop-label {
+            position: absolute;
+            transform: translate(-50%, -100%);
+            background: rgba(15, 23, 42, 0.9);
+            border: 2px solid #fbbf24;
+            color: #fbbf24;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-weight: 900;
+            font-size: 14px;
+            pointer-events: auto;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            white-space: nowrap;
+            display: none;
+            z-index: 15;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+
+        .shop-label::after {
+            content: '';
+            position: absolute;
+            bottom: -6px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-width: 6px 6px 0;
+            border-style: solid;
+            border-color: #fbbf24 transparent;
+            display: block;
+            width: 0;
+        }
+
+        .shop-label.active {
+            display: block;
+            animation: bounce-label 0.6s infinite alternate cubic-bezier(0.45, 0.05, 0.55, 0.95);
+        }
+
+        @keyframes bounce-label {
+            0% { transform: translate(-50%, -100%); }
+            100% { transform: translate(-50%, -115%); }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-white select-none">
+
+    <div id="canvas-container" class="relative w-full h-full">
+        <canvas id="game-canvas"></canvas>
+        <div id="scanline-overlay" class="scanlines"></div>
+        <div id="flash-overlay" class="absolute inset-0 bg-white opacity-0 z-30 pointer-events-none"></div>
+
+        <!-- 店名看板UI（近づいたら表示） -->
+        <div id="label-weapon" class="shop-label" onclick="openShopModal('modal-weapon')"><i class="fa-solid fa-shield-halved"></i> 武器屋 [E]</div>
+        <div id="label-ability" class="shop-label" onclick="openShopModal('modal-ability')"><i class="fa-solid fa-wand-magic-sparkles"></i> 能力屋 [E]</div>
+        <div id="label-general" class="shop-label" onclick="openShopModal('modal-general')"><i class="fa-solid fa-flask"></i> 雑貨店 [E]</div>
+        <div id="label-gacha" class="shop-label" onclick="openShopModal('modal-gacha')"><i class="fa-solid fa-dice"></i> ガチャ屋 [E]</div>
+
+        <!-- Parry / Slow-motion Overlay -->
+        <div id="parry-overlay" class="absolute inset-0 bg-cyan-500/20 border-[12px] border-cyan-400/80 opacity-0 transition-opacity pointer-events-none z-20 flex items-center justify-center">
+            <div class="text-cyan-300 font-black text-4xl md:text-5xl tracking-widest animate-ping drop-shadow-[0_0_20px_rgba(34,211,238,1)]">PARRY NOW! [F]</div>
+        </div>
+    </div>
+
+    <!-- UI Overlay Layer -->
+    <div id="ui-layer" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 z-10">
+        
+        <!-- Top HUD -->
+        <div id="hud-top" class="flex justify-between items-start w-full opacity-0 transition-opacity duration-300">
+            <div class="flex items-center gap-3">
+                <div class="bg-slate-900/90 backdrop-blur border-2 border-amber-400 px-4 py-2 rounded-2xl flex items-center gap-3 shadow-2xl">
+                    <span class="text-amber-400 font-black text-sm">スコア</span>
+                    <span id="score-val" class="text-3xl font-black text-white">0</span>
+                    <span class="text-xs text-slate-400 font-bold">マス</span>
+                    <span class="text-amber-400 font-black ml-2 text-xs bg-amber-400/20 px-2.5 py-1 rounded-md border border-amber-400/40" id="biome-val">始まりの村</span>
+                </div>
+
+                <!-- 所持ポイント表示 -->
+                <div class="bg-slate-900/90 backdrop-blur border-2 border-yellow-500 px-4 py-2 rounded-2xl flex items-center gap-2 shadow-2xl">
+                    <i class="fa-solid fa-coins text-yellow-400 text-lg"></i>
+                    <span id="points-val" class="text-2xl font-black text-yellow-300">0</span>
+                    <span class="text-xs text-yellow-500 font-bold">P</span>
+                </div>
+
+                <!-- コンボ倍率表示 -->
+                <div id="combo-container" class="bg-slate-900/90 backdrop-blur border-2 border-red-500 px-4 py-2 rounded-2xl flex items-center gap-2 shadow-2xl hidden">
+                    <i class="fa-solid fa-fire text-red-500 text-lg animate-pulse"></i>
+                    <span id="combo-count" class="text-xl font-black text-red-400">0</span>
+                    <span class="text-xs text-red-300 font-bold">COMBO</span>
+                    <span id="combo-multiplier" class="text-xs bg-red-500/20 text-red-400 font-black px-1.5 py-0.5 rounded border border-red-500/40">x1.0</span>
+                </div>
+            </div>
+
+            <!-- Boss HP Gauge -->
+            <div id="boss-hp-container" class="hidden flex-col items-center bg-slate-900/90 border-2 border-red-600 px-6 py-2 rounded-2xl shadow-2xl w-64 md:w-80">
+                <div id="boss-name" class="text-red-400 font-black text-xs mb-1 tracking-wider">BOSS NAME</div>
+                <div id="boss-stun-text" class="text-cyan-300 font-black text-xs hidden mb-1 animate-bounce">体勢崩れ中！(GUARD CRASH)</div>
+                <div class="w-full bg-slate-800 h-3 rounded-full overflow-hidden border border-slate-700">
+                    <div id="boss-hp-bar" class="bg-gradient-to-r from-red-600 to-amber-500 h-full w-full transition-all duration-150"></div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 pointer-events-auto">
+                <div class="bg-slate-900/90 backdrop-blur border border-slate-700 px-3 py-2 rounded-xl text-xs font-bold text-slate-300 shadow">
+                    ベスト: <span id="best-score-val" class="text-amber-400 font-black text-sm">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Action / Parry Button HUD -->
+        <div id="action-hud" class="absolute bottom-6 left-1/2 transform -translate-x-1/2 pointer-events-auto opacity-0 transition-opacity duration-300 flex flex-col items-center">
+            <button id="btn-action-f" class="btn-bounce bg-gradient-to-r from-red-600 via-amber-500 to-yellow-500 hover:from-red-500 hover:to-yellow-400 text-white font-black px-8 py-3.5 rounded-2xl shadow-[0_0_25px_rgba(245,158,11,0.5)] border-2 border-white flex items-center gap-3 text-xl">
+                <span class="bg-black/50 px-3 py-1 rounded-lg text-amber-300 font-black text-base border border-amber-400/50">F</span>
+                <span id="action-text" class="drop-shadow-md">F：攻撃 / パリィ</span>
+            </button>
+        </div>
+
+        <!-- Story Dialog Subtitles -->
+        <div id="story-dialog-container" class="absolute inset-x-0 bottom-24 flex justify-center items-center pointer-events-none opacity-0 transition-opacity duration-300">
+            <div class="bg-slate-950/95 border-2 border-amber-400 text-white px-8 py-4 rounded-2xl max-w-xl text-center shadow-[0_0_30px_rgba(0,0,0,0.9)] backdrop-blur-md">
+                <div id="story-speaker" class="text-amber-400 font-black text-sm mb-1 tracking-widest">話者</div>
+                <div id="story-text" class="text-xl font-black leading-snug tracking-wide">物語のテロップメッセージ</div>
+            </div>
+        </div>
+
+        <!-- Class Ability HUD -->
+        <div id="skill-hud" class="absolute bottom-6 left-6 pointer-events-auto opacity-0 transition-opacity duration-300 flex items-center gap-3">
+            <button id="btn-skill" class="relative group bg-gradient-to-tr from-amber-600 to-yellow-400 hover:from-amber-500 hover:to-yellow-300 text-slate-950 p-4 rounded-2xl shadow-2xl border-2 border-white/90 active:scale-95 transition flex flex-col items-center justify-center min-w-[95px]">
+                <i id="skill-icon" class="fa-solid fa-bolt text-3xl mb-1 drop-shadow"></i>
+                <span id="skill-name-hud" class="text-xs font-black">奥義発動</span>
+                <div id="skill-cooldown-overlay" class="absolute inset-0 bg-slate-950/85 rounded-2xl flex items-center justify-center text-amber-400 font-black text-2xl hidden backdrop-blur-sm">
+                    <span id="cooldown-timer">5</span>s
+                </div>
+            </button>
+            <div class="text-left bg-slate-900/90 border border-slate-700 p-3 rounded-xl backdrop-blur shadow-xl hidden md:block">
+                <div class="text-[10px] text-amber-400 font-black uppercase tracking-wider">必殺技 [SPACE]</div>
+                <div id="skill-desc-hud" class="text-xs font-bold text-white max-w-[170px] leading-snug">スキル効果の説明が入ります。</div>
+            </div>
+        </div>
+
+        <!-- Mobile Touch Controls -->
+        <div id="mobile-controls" class="absolute bottom-6 right-6 pointer-events-auto grid grid-cols-3 gap-2 w-36 h-36 md:hidden opacity-80">
+            <div></div>
+            <button id="btn-up" class="bg-slate-800/90 border-2 border-amber-400/50 rounded-2xl flex items-center justify-center text-amber-400 text-xl active:bg-amber-400 active:text-slate-950"><i class="fa-solid fa-chevron-up"></i></button>
+            <div></div>
+            <button id="btn-left" class="bg-slate-800/90 border-2 border-amber-400/50 rounded-2xl flex items-center justify-center text-amber-400 text-xl active:bg-amber-400 active:text-slate-950"><i class="fa-solid fa-chevron-left"></i></button>
+            <button id="btn-down" class="bg-slate-800/90 border-2 border-amber-400/50 rounded-2xl flex items-center justify-center text-amber-400 text-xl active:bg-amber-400 active:text-slate-950"><i class="fa-solid fa-chevron-down"></i></button>
+            <button id="btn-right" class="bg-slate-800/90 border-2 border-amber-400/50 rounded-2xl flex items-center justify-center text-amber-400 text-xl active:bg-amber-400 active:text-slate-950"><i class="fa-solid fa-chevron-right"></i></button>
+        </div>
+    </div>
+
+    <!-- Title Screen -->
+    <div id="screen-title" class="absolute inset-0 z-30 flex flex-col items-center justify-between p-8 bg-gradient-to-b from-sky-500/30 via-slate-950/80 to-slate-950/98 pointer-events-auto">
+        <div class="mt-12 text-center transform hover:scale-105 transition duration-300">
+            <div class="inline-block bg-amber-400 text-slate-950 font-black text-xs px-4 py-1.5 rounded-full mb-3 tracking-widest shadow-lg">HIGH-SPEED VOXEL ACTION RPG</div>
+            <h1 class="text-5xl md:text-7xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-amber-400 to-yellow-500 drop-shadow-[0_5px_15px_rgba(245,158,11,0.4)]">
+                ROAD HOPPER<br><span class="text-4xl md:text-6xl text-amber-400">RPG</span>
+            </h1>
+            <p class="text-slate-300 font-bold mt-3 text-sm md:text-base tracking-wide">~ 奪われたチンアナゴと始まりの村 ~</p>
+        </div>
+
+        <div class="flex flex-col items-center gap-4 w-full max-w-xs mb-8">
+            <button id="btn-start-game" class="btn-bounce w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-black text-2xl py-4 rounded-2xl shadow-[0_0_30px_rgba(245,158,11,0.6)] border-b-4 border-amber-700 flex items-center justify-center gap-3">
+                <i class="fa-solid fa-play"></i> 冒険をはじめる
+            </button>
+        </div>
+    </div>
+
+    <!-- Class Selection Screen -->
+    <div id="screen-class" class="absolute inset-0 z-30 flex flex-col items-center justify-between p-6 bg-slate-950/95 backdrop-blur-md pointer-events-auto hidden">
+        <div class="text-center mt-4">
+            <h2 class="text-3xl md:text-4xl font-black text-amber-400 tracking-wide drop-shadow">初期役職を選択</h2>
+            <p class="text-slate-400 text-xs md:text-sm mt-1">選んだ職業の超絶奥義で立体的な道路とボス戦を突破せよ！</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 w-full max-w-5xl my-auto overflow-y-auto max-h-[65vh] p-2" id="class-selection-container"></div>
+
+        <button id="btn-confirm-class" class="btn-bounce bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black text-xl px-10 py-3.5 rounded-2xl shadow-[0_0_20px_rgba(245,158,11,0.5)] opacity-50 cursor-not-allowed" disabled>
+            この勇者で出陣する
+        </button>
+    </div>
+
+    <!-- Cinematic Story Banner -->
+    <div id="screen-banner" class="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/80 pointer-events-none opacity-0 transition-opacity duration-500">
+        <div class="text-center transform scale-90 transition-transform duration-500" id="banner-content">
+            <div id="banner-subtitle" class="text-red-500 font-black text-3xl mb-2 tracking-widest animate-pulse drop-shadow">MISSION START</div>
+            <h1 id="banner-title" class="text-4xl md:text-6xl font-black text-white bg-red-600 px-10 py-5 rounded-2xl shadow-[0_0_40px_rgba(220,38,38,0.8)] border-4 border-yellow-400 transform -rotate-1">
+                チンアナゴを奪還せよ！
+            </h1>
+        </div>
+    </div>
+
+    <!-- Game Over Modal -->
+    <div id="screen-gameover" class="absolute inset-0 z-30 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md pointer-events-auto hidden">
+        <div class="pixel-box p-6 md:p-8 w-full max-w-sm text-center flex flex-col items-center">
+            <div class="text-red-500 font-black text-3xl mb-2">冒険失敗...</div>
+            <div id="cause-of-death" class="text-xs text-slate-300 mb-4 font-bold">障害物と衝突してしまった！</div>
+
+            <div class="bg-slate-950/80 rounded-xl p-4 w-full mb-6 border border-slate-800">
+                <div class="text-xs text-slate-400 font-bold">到達スコア</div>
+                <div id="final-score" class="text-4xl font-black text-amber-400 my-1">0</div>
+                <div class="text-xs text-amber-300 font-bold">獲得ポイント: +<span id="earned-points">0</span>P</div>
+            </div>
+
+            <div class="flex flex-col gap-3 w-full">
+                <button id="btn-retry" class="btn-bounce w-full bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black text-base py-3 rounded-xl shadow-lg flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-rotate-right"></i> 再戦する
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SHOP MODAL: 武器屋 -->
+    <div id="modal-weapon" class="absolute inset-0 z-50 flex items-center justify-center p-4 modal-overlay hidden pointer-events-auto">
+        <div class="pixel-box p-6 w-full max-w-md text-center">
+            <div class="text-amber-400 font-black text-2xl mb-1"><i class="fa-solid fa-shield-halved"></i> 武器屋</div>
+            <p class="text-xs text-slate-300 mb-4">武器にエンチャント属性を付与して強力な追加効果を発動！</p>
+            
+            <div class="space-y-3 mb-6 text-left">
+                <div class="bg-slate-900 border border-slate-700 p-3 rounded-xl flex justify-between items-center">
+                    <div>
+                        <div class="font-bold text-red-400 text-sm"><i class="fa-solid fa-fire"></i> 炎のエンチャント</div>
+                        <div class="text-[10px] text-slate-400">攻撃時に関係属性エフェクトを発散＆威力UP</div>
+                    </div>
+                    <button onclick="buyItem('elem_fire', 150)" class="bg-red-600 hover:bg-red-500 text-white font-black px-4 py-2 rounded-lg text-xs btn-bounce">150Pで購入</button>
+                </div>
+
+                <div class="bg-slate-900 border border-slate-700 p-3 rounded-xl flex justify-between items-center">
+                    <div>
+                        <div class="font-bold text-cyan-400 text-sm"><i class="fa-solid fa-snowflake"></i> 氷のエンチャント</div>
+                        <div class="text-[10px] text-slate-400">敵の動きを緩慢・凍結状態にする</div>
+                    </div>
+                    <button onclick="buyItem('elem_ice', 150)" class="bg-cyan-600 hover:bg-cyan-500 text-white font-black px-4 py-2 rounded-lg text-xs btn-bounce">150Pで購入</button>
+                </div>
+
+                <div class="bg-slate-900 border border-slate-700 p-3 rounded-xl flex justify-between items-center">
+                    <div>
+                        <div class="font-bold text-yellow-400 text-sm"><i class="fa-solid fa-bolt"></i> 雷のエンチャント</div>
+                        <div class="text-[10px] text-slate-400">パルス攻撃で広範囲を巻き込む</div>
+                    </div>
+                    <button onclick="buyItem('elem_thunder', 150)" class="bg-yellow-600 hover:bg-yellow-500 text-white font-black px-4 py-2 rounded-lg text-xs btn-bounce">150Pで購入</button>
+                </div>
+            </div>
+
+            <button onclick="closeModal('modal-weapon')" class="bg-slate-700 hover:bg-slate-600 text-white font-bold px-6 py-2 rounded-xl">店を出る</button>
+        </div>
+    </div>
+
+    <!-- SHOP MODAL: 雑貨店 -->
+    <div id="modal-general" class="absolute inset-0 z-50 flex items-center justify-center p-4 modal-overlay hidden pointer-events-auto">
+        <div class="pixel-box p-6 w-full max-w-md text-center">
+            <div class="text-emerald-400 font-black text-2xl mb-1"><i class="fa-solid fa-flask"></i> 雑貨店</div>
+            <p class="text-xs text-slate-300 mb-4">冒険に役立つアイテムを各50Pで購入できます。</p>
+            
+            <div class="space-y-3 mb-6 text-left">
+                <div class="bg-slate-900 border border-slate-700 p-3 rounded-xl flex justify-between items-center">
+                    <div>
+                        <div class="font-bold text-emerald-300 text-sm">スピードアップポーション</div>
+                        <div class="text-[10px] text-slate-400">10秒間、移動速度が大幅にアップ！</div>
+                    </div>
+                    <button onclick="buyItem('speed', 50)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-black px-4 py-2 rounded-lg text-xs btn-bounce">50Pで購入</button>
+                </div>
+
+                <div class="bg-slate-900 border border-slate-700 p-3 rounded-xl flex justify-between items-center">
+                    <div>
+                        <div class="font-bold text-amber-300 text-sm">無敵シールドポーション</div>
+                        <div class="text-[10px] text-slate-400">1回分の衝突・落水を無効化するバリアを展開。</div>
+                    </div>
+                    <button onclick="buyItem('shield', 50)" class="bg-amber-600 hover:bg-amber-500 text-white font-black px-4 py-2 rounded-lg text-xs btn-bounce">50Pで購入</button>
+                </div>
+            </div>
+
+            <button onclick="closeModal('modal-general')" class="bg-slate-700 hover:bg-slate-600 text-white font-bold px-6 py-2 rounded-xl">店を出る</button>
+        </div>
+    </div>
+
+    <!-- SHOP MODAL: 能力屋 -->
+    <div id="modal-ability" class="absolute inset-0 z-50 flex items-center justify-center p-4 modal-overlay hidden pointer-events-auto">
+        <div class="pixel-box p-6 w-full max-w-md text-center">
+            <div class="text-cyan-400 font-black text-2xl mb-1"><i class="fa-solid fa-wand-magic-sparkles"></i> 能力屋</div>
+            <p class="text-xs text-slate-300 mb-4">現在の役職の能力を設定・切り替えます。</p>
+            
+            <div id="ability-item-container" class="space-y-3 mb-6 text-left"></div>
+
+            <button onclick="closeModal('modal-ability')" class="bg-slate-700 hover:bg-slate-600 text-white font-bold px-6 py-2 rounded-xl">店を出る</button>
+        </div>
+    </div>
+
+    <!-- SHOP MODAL: ガチャ屋 -->
+    <div id="modal-gacha" class="absolute inset-0 z-50 flex items-center justify-center p-4 modal-overlay hidden pointer-events-auto">
+        <div class="pixel-box p-6 w-full max-w-md text-center">
+            <div class="text-purple-400 font-black text-2xl mb-1"><i class="fa-solid fa-dice"></i> ガチャ屋</div>
+            <p class="text-xs text-slate-300 mb-2">ランダムで新しい役職を獲得！すでに持っている役職が被ると<span class="text-yellow-400 font-bold">100P</span>返金されます。</p>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 mb-4 text-[11px] text-slate-300 text-left">
+                <div class="font-bold text-amber-400 mb-1">【排出確率】</div>
+                <div class="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                    <div>アンコモン (5種): 50%</div>
+                    <div>レア (4種): 30%</div>
+                    <div>SR (3種): 10%</div>
+                    <div>エピック (2種): 5%</div>
+                    <div>レジェンド (1種): 3%</div>
+                    <div>ミミック (1種): 2%</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 mb-6">
+                <button onclick="drawGacha(1000, false)" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black py-3 rounded-xl shadow-lg btn-bounce">
+                    通常ガチャ (1000P)
+                </button>
+                <button onclick="drawGacha(2000, true)" class="bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black py-3 rounded-xl shadow-lg btn-bounce">
+                    レア枠可能性1%UPガチャ (2000P)
+                </button>
+            </div>
+
+            <button onclick="closeModal('modal-gacha')" class="bg-slate-700 hover:bg-slate-600 text-white font-bold px-6 py-2 rounded-xl">店を出る</button>
+        </div>
+    </div>
+
+    <!-- Skip Cinematic Button -->
+    <button id="btn-skip-intro" class="absolute top-4 left-4 z-40 bg-slate-900/80 border border-slate-700 text-xs font-bold text-slate-300 px-3.5 py-2 rounded-xl pointer-events-auto hidden hover:bg-slate-800">
+        演出をスキップ <i class="fa-solid fa-forward ml-1"></i>
+    </button>
+
+    <script>
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.enabled = true;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioCtx();
+                }
+            }
+
+            playHop() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(350, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(700, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            }
+
+            playParry() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(600, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1800, this.ctx.currentTime + 0.35);
+                gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.35);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.35);
+            }
+
+            playChinAnagoVoiceHappy() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(900, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1500, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            }
+
+            playChinAnagoVoiceShock() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(1300, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(500, this.ctx.currentTime + 0.35);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.35);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.35);
+            }
+
+            playThunder() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(140, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(20, this.ctx.currentTime + 0.9);
+                gain.gain.setValueAtTime(0.45, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.9);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.9);
+            }
+
+            playCorrupt() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(30, this.ctx.currentTime + 0.4);
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.4);
+            }
+
+            playSkill() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(450, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1200, this.ctx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            }
+
+            playCrash() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(20, this.ctx.currentTime + 0.25);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            }
+
+            playCoin() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(987.77, this.ctx.currentTime);
+                osc.frequency.setValueAtTime(1318.51, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            }
+        }
+
+        const audio = new SoundFX();
+
+        const TILE_SIZE = 1;
+        const GRID_WIDTH = 13;
+        
+        let scene, camera, renderer;
+        let playerGroup, characterMesh, weaponMesh;
+        let demonGroup, chinAnagoMesh;
+        let surpriseIconMesh;
+        let magicAuraGroup, shockwaveRing, redParticleSystem;
+        let dirLight, ambientLight, demonLight;
+        let lanes = [];
+        let playerPos = { x: 0, z: 0 };
+        let targetPos = { x: 0, z: 0 };
+        let isHopping = false;
+        let hopProgress = 0;
+        let currentScore = 0;
+        let minZReached = 0;
+        let bestScore = parseInt(localStorage.getItem('road_hopper_best') || '0');
+        let playerPoints = parseInt(localStorage.getItem('road_hopper_points') || '0');
+        let gameState = 'TITLE';
+        let selectedClass = 'warrior';
+
+        let unlockedClasses = JSON.parse(localStorage.getItem('road_hopper_unlocked') || '["warrior", "rogue", "cleric", "mage", "monk"]');
+        let unlockedAbilities = JSON.parse(localStorage.getItem('road_hopper_abilities') || '{}');
+        let equippedAbilities = JSON.parse(localStorage.getItem('road_hopper_equipped') || '{}');
+
+        // ショップ用ターゲットデータ構造
+        let shopTargets = [];
+
+        // Boss Battle States
+        let currentBoss = null;
+        let bossActive = false;
+        let bossHp = 100;
+        let bossMaxHp = 100;
+        let bossAttackTimer = 0;
+        let bossAbilityTimer = 0;
+        let bossScrollSpeed = 0.012;
+        let bossCameraZOffset = 0;
+        let bossBullets = [];
+        let bossMeteors = [];
+        let bossSpikes = [];
+        let bossEncountered = { mid: false, gate: false, demon: false };
+        let bossStunTimer = 0;
+
+        let targetBgColor = new THREE.Color(0x87ceeb);
+        let targetFogColor = new THREE.Color(0x87ceeb);
+
+        let skillCooldown = 0;
+        let skillActiveTimer = 0;
+        let hasShield = false;
+        let shieldMesh = null;
+        let auraParticles = [];
+        let vfxGroup = null;
+
+        let actionAnimTimer = 0;
+        let isActionAnimActive = false;
+        let attackSlashTrail = null;
+
+        let zombies = [];
+        let skeletons = [];
+        let arrows = [];
+        let pointOrbs = [];
+        let timeScale = 1.0;
+        let zombieSlowTimer = 0;
+        let zombieAttackTarget = null;
+        let zombieAttackFlashTimer = 0;
+
+        // Combo & Element
+        let comboCount = 0;
+        let comboTimer = 0;
+        let weaponElement = 'none'; // 'none', 'fire', 'ice', 'thunder'
+
+        let camTargetPos = new THREE.Vector3();
+        let camTargetLookAt = new THREE.Vector3();
+        let currentCamLookAt = new THREE.Vector3();
+        let isCameraControlledByAnim = false;
+
+        const COLOR_GRASS = 0x56ab2f;
+        const COLOR_ROAD = 0x3a3d40;
+        const COLOR_WATER_BLUE = 0x0284c7;
+        const COLOR_RAIL_BASE = 0x27272a;
+        const COLOR_CORRUPT_VOID = 0x2e1065;
+
+        // 役職データ定義
+        const ALL_CLASSES = {
+            warrior: { id: 'warrior', name: "戦士", rarity: "アンコモン", rarityClass: "text-green-400", skillName: "剛力覚醒", desc: "一定時間巨体化！障害物を粉砕して突き進む。", cooldown: 10, color: 0xef4444, icon: "fa-shield-halved", defaultAbilityName: "頑丈", defaultAbilityDesc: "基本防御力が少し上昇", abilityName: "鉄壁の構え", abilityDesc: "被ダメージ軽減＆吹っ飛び防止", abilityCost: 600 },
+            rogue: { id: 'rogue', name: "盗賊", rarity: "アンコモン", rarityClass: "text-green-400", skillName: "疾風瞬天", desc: "前方へ無敵状態で残像瞬身移動！", cooldown: 8, color: 0xa855f7, icon: "fa-person-running", defaultAbilityName: "軽業", defaultAbilityDesc: "移動時の隙が少ない", abilityName: "金品強奪", abilityDesc: "獲得Pが常に1.5倍になる", abilityCost: 500 },
+            cleric: { id: 'cleric', name: "僧侶", rarity: "アンコモン", rarityClass: "text-green-400", skillName: "聖域展開", desc: "聖なる障壁を生成。水没や衝突を完全に防止。", cooldown: 12, color: 0x10b981, icon: "fa-wand-magic-sparkles", defaultAbilityName: "祈り", defaultAbilityDesc: "初期から1回分シールドを保持", abilityName: "自動回復", abilityDesc: "一度だけミスを無効化して復帰する", abilityCost: 800 },
+            mage: { id: 'mage', name: "魔法使い", rarity: "アンコモン", rarityClass: "text-green-400", skillName: "極大天天隕石", desc: "上空から巨大隕石を召喚し前方障害物を全滅。", cooldown: 11, color: 0x3b82f6, icon: "fa-meteor", defaultAbilityName: "魔力集中", defaultAbilityDesc: "通常攻撃のリーチ拡大", abilityName: "魔力瞑想", abilityDesc: "クールダウン時間を20%短縮", abilityCost: 750 },
+            monk: { id: 'monk', name: "武闘家", rarity: "アンコモン", rarityClass: "text-green-400", skillName: "覇王連撃拳", desc: "覇気の光輪を放ち超高速連続突撃を行う。", cooldown: 9, color: 0xf97316, icon: "fa-hand-fist", defaultAbilityName: "体術", defaultAbilityDesc: "パリィ成功時の受付時間増加", abilityName: "明鏡止水", abilityDesc: "スキル発動時、周囲の敵を消滅させる", abilityCost: 650 },
+            paladin: { id: 'paladin', name: "聖騎士", rarity: "レア", rarityClass: "text-blue-400", skillName: "ディヴァインクロス", desc: "前方一帯を聖なる十字光線で薙ぎ払う。", cooldown: 10, color: 0x38bdf8, icon: "fa-cross", defaultAbilityName: "聖なる光", defaultAbilityDesc: "アンデッド系敵へ自動追加ダメ", abilityName: "聖壁", abilityDesc: "ゾンビィの攻撃を受ける直前に1回だけ完全無効化", abilityCost: 700 },
+            assassin: { id: 'assassin', name: "暗殺者", rarity: "レア", rarityClass: "text-blue-400", skillName: "影潜み", desc: "姿を消してあらゆる罠や障害物をすり抜ける。", cooldown: 9, color: 0x4c1d95, icon: "fa-user-ninja", defaultAbilityName: "暗影", defaultAbilityDesc: "敵に見つかりにくくなる", abilityName: "影刃", abilityDesc: "ゾンビィの攻撃中にFを当てると獲得Pが+50%", abilityCost: 700 },
+            elemental: { id: 'elemental', name: "精霊使い", rarity: "レア", rarityClass: "text-blue-400", skillName: "エレメンタルブラスト", desc: "氷と炎の精霊を解き放ち前方を凍結爆破。", cooldown: 10, color: 0x06b6d4, icon: "fa-snowflake", defaultAbilityName: "精霊の加護", defaultAbilityDesc: "エンチャント属性の威力を強化", abilityName: "元素循環", abilityDesc: "F撃破時、次のスキルCTを2秒短縮", abilityCost: 750 },
+            berserker: { id: 'berserker', name: "狂戦士", rarity: "レア", rarityClass: "text-blue-400", skillName: "血風怒濤", desc: "凶暴化して超高速で前進し障害物を粉砕。", cooldown: 8, color: 0x9f1239, icon: "fa-skull", defaultAbilityName: "血の渇き", defaultAbilityDesc: "敵撃破時にコンボ数が2増える", abilityName: "狂熱", abilityDesc: "ゾンビィを連続撃破するほどFの有効距離が伸びる", abilityCost: 800 },
+            samurai: { id: 'samurai', name: "侍", rarity: "スーパーレア", rarityClass: "text-purple-400", skillName: "居合一閃・神威", desc: "画面内の敵や障害物を一瞬で両断する。", cooldown: 9, color: 0xe11d48, icon: "fa-toilet-paper-slash", defaultAbilityName: "見切り", defaultAbilityDesc: "パリィ時のスコア倍率アップ", abilityName: "居合の心得", abilityDesc: "スローモーション中のF攻撃が必ずクリティカル扱いになる", abilityCost: 850 },
+            necromancer: { id: 'necromancer', name: "死霊術師", rarity: "スーパーレア", rarityClass: "text-purple-400", skillName: "サモン・アンデッド", desc: "骸骨兵を召喚して前方へ突撃させる。", cooldown: 10, color: 0x581c87, icon: "fa-ghost", defaultAbilityName: "死霊召喚", defaultAbilityDesc: "たまに骸骨が自動で盾になる", abilityName: "亡者の契約", abilityDesc: "ゾンビィ撃破時、追加で+25Pを獲得", abilityCost: 900 },
+            bard: { id: 'bard', name: "吟遊詩人", rarity: "スーパーレア", rarityClass: "text-purple-400", skillName: "英雄の賛歌", desc: "美しき調べで時間をスローにし確実に進む。", cooldown: 11, color: 0xf59e0b, icon: "fa-music", defaultAbilityName: "奏楽", defaultAbilityDesc: "周囲のアイテムを自動引き寄せ", abilityName: "テンポアップ", abilityDesc: "ゾンビィの攻撃スローモーションがさらに長くなる", abilityCost: 850 },
+            dragon_knight: { id: 'dragon_knight', name: "竜騎士", rarity: "エピック", rarityClass: "text-pink-400", skillName: "ドラゴンバースト", desc: "竜の咆哮とともに前方に壊滅的ブレスを放つ。", cooldown: 9, color: 0xbd1e59, icon: "fa-dragon", defaultAbilityName: "飛竜の翼", defaultAbilityDesc: "ジャンプ移動距離が延びる", abilityName: "竜威", abilityDesc: "ゾンビィが近づくと自動で少し後退させる", abilityCost: 950 },
+            archmage: { id: 'archmage', name: "大賢者", rarity: "エピック", rarityClass: "text-pink-400", skillName: "アルティメットノヴァ", desc: "極大魔法陣を形成し周囲を完全に消滅させる。", cooldown: 10, color: 0x6366f1, icon: "fa-hat-wizard", defaultAbilityName: "魔導の極意", defaultAbilityDesc: "スキルCTが常に15%短縮", abilityName: "時空演算", abilityDesc: "スキル発動中、ゾンビィの移動速度を大幅に低下", abilityCost: 1000 },
+            hero: { id: 'hero', name: "伝説の勇者", rarity: "レジェンド", rarityClass: "text-yellow-400 font-black", skillName: "ファイナルエクスプロージョン", desc: "神々の力を借りて画面上の全ての敵と障害物を吹き飛ばす！", cooldown: 7, color: 0xfacc15, icon: "fa-crown", defaultAbilityName: "勇者の覇気", defaultAbilityDesc: "全ステータスが大幅強化", abilityName: "英雄の財宝", abilityDesc: "ゾンビィ撃破Pが2倍になり、追加コンボPも獲得", abilityCost: 1000 },
+            mimic: { id: 'mimic', name: "ミミック", rarity: "ミミック", rarityClass: "text-red-500 font-black animate-pulse", skillName: "宝箱乱打", desc: "大量のコインを撒き散らしながら暴走前進する！", cooldown: 6, color: 0xb45309, icon: "fa-box-open", defaultAbilityName: "擬態", defaultAbilityDesc: "ダメージを受けるとコインを排出", abilityName: "強欲の壺", abilityDesc: "移動するだけでポイント自動獲得", abilityCost: 500 }
+        };
+
+        function updatePointsUI() {
+            document.getElementById('points-val').innerText = playerPoints;
+            localStorage.setItem('road_hopper_points', playerPoints);
+        }
+
+        function createBox(w, h, d, color, x=0, y=0, z=0, emissive=0x000000) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: color, 
+                roughness: 0.3, 
+                metalness: 0.2,
+                emissive: emissive,
+                transparent: false,
+                opacity: 1.0
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            return mesh;
+        }
+
+        function triggerFlash() {
+            const el = document.getElementById('flash-overlay');
+            el.style.opacity = '0.9';
+            setTimeout(() => { el.style.opacity = '0'; }, 120);
+        }
+
+        function createHeroMesh(jobType = 'warrior') {
+            const group = new THREE.Group();
+            weaponMesh = null;
+            
+            const cData = ALL_CLASSES[jobType] || ALL_CLASSES.warrior;
+
+            const body = createBox(0.6, 0.6, 0.6, cData.color, 0, 0.3, 0);
+            group.add(body);
+
+            const beak = createBox(0.2, 0.15, 0.2, 0xfbbf24, 0, 0.35, -0.35);
+            group.add(beak);
+
+            const comb = createBox(0.12, 0.2, 0.3, 0xef4444, 0, 0.65, 0);
+            group.add(comb);
+
+            const eyeL = createBox(0.08, 0.08, 0.08, 0x000000, 0.25, 0.42, -0.25);
+            const eyeR = createBox(0.08, 0.08, 0.08, 0x000000, -0.25, 0.42, -0.25);
+            group.add(eyeL, eyeR);
+
+            const trailGeo = new THREE.PlaneGeometry(1.8, 1.8);
+            const trailMat = new THREE.MeshBasicMaterial({
+                color: 0xfacc15,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0
+            });
+            attackSlashTrail = new THREE.Mesh(trailGeo, trailMat);
+            attackSlashTrail.rotation.x = -Math.PI / 2;
+            attackSlashTrail.position.set(0, 0.4, -0.8);
+            group.add(attackSlashTrail);
+
+            const helmet = createBox(0.64, 0.2, 0.64, 0x94a3b8, 0, 0.55, 0);
+            
+            let wEmissive = 0x38bdf8;
+            if (weaponElement === 'fire') wEmissive = 0xef4444;
+            if (weaponElement === 'ice') wEmissive = 0x06b6d4;
+            if (weaponElement === 'thunder') wEmissive = 0xeab308;
+
+            weaponMesh = createBox(0.14, 0.85, 0.14, 0xf8fafc, 0.38, 0.4, -0.2, wEmissive);
+            group.add(helmet, weaponMesh);
+
+            return group;
+        }
+
+        function createZombieMesh() {
+            const group = new THREE.Group();
+            const body = createBox(0.5, 0.7, 0.4, 0x15803d, 0, 0.35, 0);
+            const head = createBox(0.4, 0.4, 0.4, 0x166534, 0, 0.8, 0);
+            const eyeL = createBox(0.08, 0.08, 0.08, 0xef4444, 0.12, 0.85, -0.21, 0xef4444);
+            const eyeR = createBox(0.08, 0.08, 0.08, 0xef4444, -0.12, 0.85, -0.21, 0xef4444);
+            const armL = createBox(0.15, 0.15, 0.5, 0x15803d, 0.3, 0.5, -0.2);
+            const armR = createBox(0.15, 0.15, 0.5, 0x15803d, -0.3, 0.5, -0.2);
+            group.add(body, head, eyeL, eyeR, armL, armR);
+            return group;
+        }
+
+        function createSkeletonMesh() {
+            const group = new THREE.Group();
+            const body = createBox(0.4, 0.7, 0.3, 0xe2e8f0, 0, 0.35, 0);
+            const head = createBox(0.4, 0.4, 0.4, 0xf1f5f9, 0, 0.8, 0);
+            const eyeL = createBox(0.08, 0.08, 0.08, 0x0f172a, 0.1, 0.82, -0.21);
+            const eyeR = createBox(0.08, 0.08, 0.08, 0x0f172a, -0.1, 0.82, -0.21);
+            const bow = createBox(0.1, 0.6, 0.1, 0x78350f, 0.3, 0.45, -0.1);
+            
+            const marker = createBox(0.2, 0.2, 0.2, 0xef4444, 0, 1.3, 0, 0xef4444);
+            group.add(body, head, eyeL, eyeR, bow, marker);
+            return group;
+        }
+
+        function createPointOrbMesh() {
+            const group = new THREE.Group();
+            const orb = createBox(0.3, 0.3, 0.3, 0xfacc15, 0, 0.2, 0, 0xfacc15);
+            group.add(orb);
+            return group;
+        }
+
+        function createChinAnagoMesh() {
+            const group = new THREE.Group();
+            const body = createBox(0.24, 1.1, 0.24, 0xf8fafc, 0, 0.55, 0);
+            const spot1 = createBox(0.26, 0.14, 0.26, 0x0f172a, 0, 0.75, 0);
+            const spot2 = createBox(0.26, 0.14, 0.26, 0x0f172a, 0, 0.38, 0);
+            const eyeL = createBox(0.07, 0.07, 0.07, 0x000000, 0.09, 0.95, -0.11);
+            const eyeR = createBox(0.07, 0.07, 0.07, 0x000000, -0.09, 0.95, -0.11);
+            group.add(body, spot1, spot2, eyeL, eyeR);
+            return group;
+        }
+
+        function createCoolDemonMesh() {
+            const group = new THREE.Group();
+            const body = createBox(1.5, 2.0, 1.2, 0x0f172a, 0, 1.0, 0);
+            const chestArmor = createBox(1.55, 0.8, 1.25, 0xd97706, 0, 1.3, 0, 0xb45309);
+            const shoulderL = createBox(0.6, 0.6, 0.7, 0x451a03, 1.0, 1.6, 0);
+            const shoulderR = createBox(0.6, 0.6, 0.7, 0x451a03, -1.0, 1.6, 0);
+            const hornL1 = createBox(0.28, 0.8, 0.28, 0xd97706, 0.6, 2.2, 0, 0x78350f);
+            const hornL2 = createBox(0.24, 0.7, 0.24, 0xef4444, 0.95, 2.65, 0, 0xd97706);
+            const hornR1 = createBox(0.28, 0.8, 0.28, 0xd97706, -0.6, 2.2, 0, 0x78350f);
+            const hornR2 = createBox(0.24, 0.7, 0.24, 0xef4444, -0.95, 2.65, 0, 0xd97706);
+            const eyeL = createBox(0.25, 0.12, 0.12, 0xff0000, 0.4, 1.6, -0.62, 0xff0000);
+            const eyeR = createBox(0.25, 0.12, 0.12, 0xff0000, -0.4, 1.6, -0.62, 0xff0000);
+            const cape = createBox(1.8, 2.4, 0.15, 0x881337, 0, 1.0, 0.65);
+
+            const wingGroup = new THREE.Group();
+            wingGroup.position.set(0, 1.4, 0.65);
+            const wingL = createBox(2.2, 1.5, 0.12, 0x450a0a, 1.4, 0.4, 0, 0x881337);
+            const wingR = createBox(2.2, 1.5, 0.12, 0x450a0a, -1.4, 0.4, 0, 0x881337);
+            wingGroup.add(wingL, wingR);
+
+            group.add(body, chestArmor, shoulderL, shoulderR, hornL1, hornL2, hornR1, hornR2, eyeL, eyeR, cape, wingGroup);
+            group.wingGroup = wingGroup;
+
+            return group;
+        }
+
+        function createSummonEffects() {
+            magicAuraGroup = new THREE.Group();
+            const ringGeo = new THREE.RingGeometry(1.0, 3.5, 32);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0xff0033, side: THREE.DoubleSide, transparent: true, opacity: 0 });
+            shockwaveRing = new THREE.Mesh(ringGeo, ringMat);
+            shockwaveRing.rotation.x = Math.PI / 2;
+            shockwaveRing.position.set(0, 0.05, -3);
+            magicAuraGroup.add(shockwaveRing);
+
+            const particleCount = 100;
+            const pGeo = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            for (let i = 0; i < particleCount * 3; i += 3) {
+                positions[i] = (Math.random() - 0.5) * 5;
+                positions[i+1] = Math.random() * 8;
+                positions[i+2] = -3 + (Math.random() - 0.5) * 5;
+            }
+            pGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const pMat = new THREE.PointsMaterial({ color: 0xff3300, size: 0.35, transparent: true, opacity: 0 });
+            redParticleSystem = new THREE.Points(pGeo, pMat);
+            magicAuraGroup.add(redParticleSystem);
+
+            scene.add(magicAuraGroup);
+        }
+
+        function createCarMesh(color = 0xef4444) {
+            const group = new THREE.Group();
+            const chassis = createBox(1.4, 0.5, 0.8, color, 0, 0.25, 0);
+            const cabin = createBox(0.8, 0.4, 0.7, 0xffffff, -0.1, 0.6, 0);
+            const wheel1 = createBox(0.3, 0.3, 0.9, 0x1e293b, 0.4, 0.15, 0);
+            const wheel2 = createBox(0.3, 0.3, 0.9, 0x1e293b, -0.4, 0.15, 0);
+            group.add(chassis, cabin, wheel1, wheel2);
+            return group;
+        }
+
+        function createLogMesh(length = 2) {
+            const group = new THREE.Group();
+            const log = createBox(length * TILE_SIZE - 0.1, 0.3, 0.75, 0x78350f, 0, 0.1, 0);
+            group.add(log);
+            return group;
+        }
+
+        function createTreeMesh() {
+            const group = new THREE.Group();
+            const trunk = createBox(0.3, 0.6, 0.3, 0x78350f, 0, 0.3, 0);
+            const foliage = createBox(0.9, 0.9, 0.9, 0x15803d, 0, 0.9, 0);
+            group.add(trunk, foliage);
+            return group;
+        }
+
+        function createFountainMesh() {
+            const group = new THREE.Group();
+            const base = createBox(2.2, 0.4, 2.2, 0x94a3b8, 0, 0.2, 0);
+            const pillar = createBox(0.6, 1.2, 0.6, 0xcbd5e1, 0, 0.8, 0);
+            const waterTop = createBox(1.2, 0.2, 1.2, 0x38bdf8, 0, 1.4, 0, 0x0284c7);
+            group.add(base, pillar, waterTop);
+            return group;
+        }
+
+        function createShopBuildingMesh(colorHex) {
+            const group = new THREE.Group();
+            const body = createBox(1.8, 1.4, 1.8, 0xf8fafc, 0, 0.7, 0);
+            const roof = createBox(2.2, 0.5, 2.2, colorHex, 0, 1.6, 0);
+            const door = createBox(0.6, 0.8, 0.1, 0x78350f, 0, 0.4, -0.92);
+            const sign = createBox(0.8, 0.4, 0.1, colorHex, 0, 2.1, -0.92, colorHex);
+            group.add(body, roof, door, sign);
+            return group;
+        }
+
+        function initEngine() {
+            const canvas = document.getElementById('game-canvas');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+            scene.fog = new THREE.FogExp2(0x87ceeb, 0.035);
+
+            const aspect = window.innerWidth / window.innerHeight;
+            const d = 8;
+            camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, -10, 100);
+            
+            camTargetPos.set(-10, 12, 10);
+            camTargetLookAt.set(0, 0, 0);
+            currentCamLookAt.set(0, 0, 0);
+
+            camera.position.copy(camTargetPos);
+            camera.lookAt(currentCamLookAt);
+
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+
+            dirLight = new THREE.DirectionalLight(0xfffbeb, 1.4);
+            dirLight.position.set(-18, 28, 18);
+            dirLight.castShadow = true;
+            
+            dirLight.shadow.mapSize.width = 4096;
+            dirLight.shadow.mapSize.height = 4096;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 70;
+            dirLight.shadow.bias = -0.0003;
+            
+            const shadowD = 18;
+            dirLight.shadow.camera.left = -shadowD;
+            dirLight.shadow.camera.right = shadowD;
+            dirLight.shadow.camera.top = shadowD;
+            dirLight.shadow.camera.bottom = -shadowD;
+            scene.add(dirLight);
+
+            demonLight = new THREE.PointLight(0xff0033, 0, 15);
+            demonLight.position.set(0, 2, -3);
+            scene.add(demonLight);
+
+            playerGroup = new THREE.Group();
+            scene.add(playerGroup);
+
+            vfxGroup = new THREE.Group();
+            scene.add(vfxGroup);
+
+            createSummonEffects();
+
+            window.addEventListener('resize', onWindowResize, false);
+
+            // キーボード操作設定
+            window.addEventListener('keydown', (e) => {
+                if (gameState !== 'PLAYING') return;
+                
+                if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') attemptHop(0, -1);
+                if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') attemptHop(0, 1);
+                if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') attemptHop(-1, 0);
+                if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') attemptHop(1, 0);
+
+                if (e.key === 'f' || e.key === 'F') triggerParryOrAttack();
+                if (e.key === ' ') triggerSkill();
+
+                if (e.key === 'e' || e.key === 'E') {
+                    // 近くのショップを開く
+                    shopTargets.forEach(s => {
+                        const dist = Math.hypot(playerPos.x - s.x, playerPos.z - s.z);
+                        if (dist < 1.8) {
+                            openShopModal(s.modalId);
+                        }
+                    });
+                }
+            });
+
+            // ボタン操作UI
+            document.getElementById('btn-action-f').addEventListener('click', triggerParryOrAttack);
+            document.getElementById('btn-skill').addEventListener('click', triggerSkill);
+
+            document.getElementById('btn-up').addEventListener('click', () => attemptHop(0, -1));
+            document.getElementById('btn-down').addEventListener('click', () => attemptHop(0, 1));
+            document.getElementById('btn-left').addEventListener('click', () => attemptHop(-1, 0));
+            document.getElementById('btn-right').addEventListener('click', () => attemptHop(1, 0));
+
+            document.getElementById('btn-start-game').addEventListener('click', () => {
+                audio.init();
+                runCinematicIntro();
+            });
+
+            document.getElementById('btn-skip-intro').addEventListener('click', () => {
+                finishCinematic();
+            });
+
+            document.getElementById('btn-retry').addEventListener('click', () => {
+                document.getElementById('screen-gameover').classList.add('hidden');
+                openClassSelection();
+            });
+
+            updatePointsUI();
+            resetWorld();
+            animate();
+        }
+
+        function onWindowResize() {
+            const aspect = window.innerWidth / window.innerHeight;
+            const d = 8;
+            camera.left = -d * aspect;
+            camera.right = d * aspect;
+            camera.top = d;
+            camera.bottom = -d;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function clearEnemies() {
+            zombies.forEach(z => scene.remove(z.mesh));
+            skeletons.forEach(s => scene.remove(s.mesh));
+            arrows.forEach(a => scene.remove(a.mesh));
+            pointOrbs.forEach(p => scene.remove(p.mesh));
+            clearBossBullets();
+            zombies = [];
+            skeletons = [];
+            arrows = [];
+            pointOrbs = [];
+        }
+
+        function clearBossBullets() {
+            bossBullets.forEach(b => scene.remove(b.mesh));
+            bossMeteors.forEach(m => scene.remove(m.mesh));
+            bossSpikes.forEach(s => scene.remove(s.mesh));
+            bossBullets = [];
+            bossMeteors = [];
+            bossSpikes = [];
+        }
+
+        function resetWorld() {
+            lanes.forEach(lane => scene.remove(lane.group));
+            lanes = [];
+            shopTargets = [];
+            clearEnemies();
+
+            if (currentBoss && currentBoss.mesh) {
+                scene.remove(currentBoss.mesh);
+                currentBoss = null;
+            }
+            bossActive = false;
+            bossAttackTimer = 0;
+            bossAbilityTimer = 0;
+            bossStunTimer = 0;
+            document.getElementById('boss-hp-container').classList.add('hidden');
+            document.getElementById('boss-stun-text').classList.add('hidden');
+
+            // 看板ラベルを全非表示
+            ['weapon', 'ability', 'general', 'gacha'].forEach(id => {
+                const el = document.getElementById(`label-${id}`);
+                if (el) el.classList.remove('active');
+            });
+
+            targetBgColor.setHex(0x87ceeb);
+            targetFogColor.setHex(0x87ceeb);
+            dirLight.color.setHex(0xfffbeb);
+            dirLight.intensity = 1.4;
+            ambientLight.intensity = 0.8;
+            demonLight.intensity = 0;
+
+            comboCount = 0;
+            comboTimer = 0;
+            updateComboUI();
+
+            createVillageArea();
+
+            for (let z = 0; z >= -25; z--) {
+                createLaneAtIndex(z, z > -3 ? 'GRASS' : null);
+            }
+
+            playerPos = { x: 0, z: 0 };
+            targetPos = { x: 0, z: 0 };
+            minZReached = 0;
+            currentScore = 0;
+            bossCameraZOffset = 0;
+            updateScoreUI();
+
+            if (playerGroup) {
+                playerGroup.position.set(0, 0, 0);
+                playerGroup.rotation.set(0, 0, 0);
+                playerGroup.scale.set(1, 1, 1);
+            }
+        }
+
+        function createVillageArea() {
+            for (let z = 1; z <= 12; z++) {
+                const laneGroup = new THREE.Group();
+                laneGroup.position.z = z;
+
+                const baseGeo = new THREE.BoxGeometry(GRID_WIDTH, 0.4, 1);
+                const baseMat = new THREE.MeshStandardMaterial({ color: 0x48bb78, roughness: 0.6 });
+                const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+                baseMesh.position.y = -0.2;
+                baseMesh.receiveShadow = true;
+                laneGroup.add(baseMesh);
+
+                const laneData = {
+                    type: 'VILLAGE',
+                    z: z,
+                    group: laneGroup,
+                    obstacles: []
+                };
+
+                if (z === 6) {
+                    const fountain = createFountainMesh();
+                    fountain.position.set(0, 0, 0);
+                    laneGroup.add(fountain);
+                    laneData.obstacles.push({ type: 'FOUNTAIN', x: 0, mesh: fountain });
+                }
+
+                if (z === 4) {
+                    const weaponShop = createShopBuildingMesh(0xef4444);
+                    weaponShop.position.set(-3, 0, 0);
+                    laneGroup.add(weaponShop);
+                    laneData.obstacles.push({ type: 'SHOP_WEAPON', x: -3, mesh: weaponShop });
+                    shopTargets.push({ id: 'weapon', labelId: 'label-weapon', modalId: 'modal-weapon', x: -3, z: 4, mesh: weaponShop });
+
+                    const abilityShop = createShopBuildingMesh(0x06b6d4);
+                    abilityShop.position.set(3, 0, 0);
+                    laneGroup.add(abilityShop);
+                    laneData.obstacles.push({ type: 'SHOP_ABILITY', x: 3, mesh: abilityShop });
+                    shopTargets.push({ id: 'ability', labelId: 'label-ability', modalId: 'modal-ability', x: 3, z: 4, mesh: abilityShop });
+                }
+
+                if (z === 8) {
+                    const itemShop = createShopBuildingMesh(0x10b981);
+                    itemShop.position.set(-3, 0, 0);
+                    laneGroup.add(itemShop);
+                    laneData.obstacles.push({ type: 'SHOP_GENERAL', x: -3, mesh: itemShop });
+                    shopTargets.push({ id: 'general', labelId: 'label-general', modalId: 'modal-general', x: -3, z: 8, mesh: itemShop });
+
+                    const gachaShop = createShopBuildingMesh(0xa855f7);
+                    gachaShop.position.set(3, 0, 0);
+                    laneGroup.add(gachaShop);
+                    laneData.obstacles.push({ type: 'SHOP_GACHA', x: 3, mesh: gachaShop });
+                    shopTargets.push({ id: 'gacha', labelId: 'label-gacha', modalId: 'modal-gacha', x: 3, z: 8, mesh: gachaShop });
+                }
+
+                if (z === 2 || z === 10) {
+                    [-5, 5].forEach(x => {
+                        const house = createShopBuildingMesh(0x94a3b8);
+                        house.position.set(x, 0, 0);
+                        laneGroup.add(house);
+                        laneData.obstacles.push({ type: 'HOUSE', x: x, mesh: house });
+                    });
+                }
+
+                if (z === 5 || z === 7) {
+                    [-2, 2].forEach(x => {
+                        const lamp = new THREE.Group();
+                        const pole = createBox(0.1, 1.2, 0.1, 0x334155, 0, 0.6, 0);
+                        const lightBox = createBox(0.25, 0.25, 0.25, 0xfde047, 0, 1.2, 0, 0xfde047);
+                        lamp.add(pole, lightBox);
+                        lamp.position.set(x, 0, 0);
+                        laneGroup.add(lamp);
+                        laneData.obstacles.push({ type: 'LAMP', x: x, mesh: lamp });
+                    });
+                }
+
+                [-6, 6].forEach(x => {
+                    const fence = createBox(0.2, 0.6, 0.9, 0x78350f, x, 0.3, 0);
+                    laneGroup.add(fence);
+                    laneData.obstacles.push({ type: 'FENCE', x: x, mesh: fence });
+                });
+
+                scene.add(laneGroup);
+                lanes.push(laneData);
+            }
+        }
+
+        function createLaneAtIndex(zIndex, fixedType = null) {
+            let type = fixedType;
+            if (!type) {
+                const rand = Math.random();
+                if (rand < 0.4) type = 'GRASS';
+                else if (rand < 0.7) type = 'ROAD';
+                else if (rand < 0.88) type = 'WATER';
+                else type = 'RAIL';
+            }
+
+            if (bossActive && (type === 'ROAD' || type === 'RAIL')) {
+                type = Math.random() < 0.6 ? 'GRASS' : 'WATER';
+            }
+
+            const laneGroup = new THREE.Group();
+            laneGroup.position.z = zIndex;
+
+            let baseMesh;
+            let waveMesh = null;
+            let ties = [];
+
+            if (type === 'WATER') {
+                const bankGeo = new THREE.BoxGeometry(GRID_WIDTH, 0.35, 1);
+                const bankMat = new THREE.MeshStandardMaterial({ color: 0x27170a, roughness: 0.9 });
+                const bankMesh = new THREE.Mesh(bankGeo, bankMat);
+                bankMesh.position.y = -0.38;
+                bankMesh.receiveShadow = true;
+                laneGroup.add(bankMesh);
+
+                const waterGeo = new THREE.BoxGeometry(GRID_WIDTH, 0.2, 0.98);
+                const waterMat = new THREE.MeshStandardMaterial({ 
+                    color: COLOR_WATER_BLUE, 
+                    transparent: true, 
+                    opacity: 0.88,
+                    roughness: 0.1,
+                    metalness: 0.3 
+                });
+                baseMesh = new THREE.Mesh(waterGeo, waterMat);
+                baseMesh.position.y = -0.1;
+                baseMesh.receiveShadow = true;
+                laneGroup.add(baseMesh);
+
+                const waveGeo = new THREE.BoxGeometry(GRID_WIDTH, 0.02, 0.3);
+                const waveMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 });
+                waveMesh = new THREE.Mesh(waveGeo, waveMat);
+                waveMesh.position.y = -0.01;
+                laneGroup.add(waveMesh);
+
+            } else {
+                let color = COLOR_GRASS;
+                if (type === 'ROAD') color = COLOR_ROAD;
+                if (type === 'RAIL') color = COLOR_RAIL_BASE;
+
+                const baseGeo = new THREE.BoxGeometry(GRID_WIDTH, 0.4, 1);
+                const baseMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6 });
+                baseMesh = new THREE.Mesh(baseGeo, baseMat);
+                baseMesh.position.y = -0.2;
+                baseMesh.receiveShadow = true;
+                laneGroup.add(baseMesh);
+            }
+
+            const laneData = {
+                type: type,
+                z: zIndex,
+                group: laneGroup,
+                baseMesh: baseMesh,
+                waveMesh: waveMesh,
+                obstacles: [],
+                rails: [],
+                ties: ties,
+                // 川は「少数の木の板をゆっくり流す」元の感覚に戻す。
+                speed: type === 'WATER'
+                    ? (Math.random() * 0.010 + 0.014) * (Math.random() > 0.5 ? 1 : -1)
+                    : (Math.random() * 0.038 + 0.022) * (Math.random() > 0.5 ? 1 : -1)
+            };
+
+            if (type === 'GRASS' && zIndex < -2 && !bossActive) {
+                for (let x = -Math.floor(GRID_WIDTH/2); x <= Math.floor(GRID_WIDTH/2); x++) {
+                    if (x !== 0 && Math.random() < 0.22) {
+                        const tree = createTreeMesh();
+                        tree.position.set(x, 0, 0);
+                        laneGroup.add(tree);
+                        laneData.obstacles.push({ type: 'TREE', x: x, mesh: tree });
+                    }
+                }
+
+                if (Math.random() < 0.18) {
+                    const zMesh = createZombieMesh();
+                    const zX = (Math.random() - 0.5) * (GRID_WIDTH - 2);
+                    zMesh.position.set(zX, 0, zIndex);
+                    scene.add(zMesh);
+                    zombies.push({
+                        mesh: zMesh, x: zX, z: zIndex,
+                        speed: 0.010 + Math.random() * 0.006,
+                        attackCooldown: 1.0 + Math.random() * 2.0,
+                        attackTimer: 0,
+                        attacking: false,
+                        dead: false
+                    });
+                }
+
+                if (Math.random() < 0.02) {
+                    const sMesh = createSkeletonMesh();
+                    const sX = Math.random() > 0.5 ? (GRID_WIDTH / 2 - 1) : (-GRID_WIDTH / 2 + 1);
+                    sMesh.position.set(sX, 0, zIndex);
+                    scene.add(sMesh);
+                    skeletons.push({ mesh: sMesh, x: sX, z: zIndex, shootTimer: 120 });
+                }
+
+            } else if (type === 'ROAD' && !bossActive) {
+                const carCount = Math.floor(Math.random() * 2) + 1;
+                const carColor = [0xef4444, 0x3b82f6, 0x10b981, 0xf59e0b, 0xec4899][Math.floor(Math.random()*5)];
+                for (let i = 0; i < carCount; i++) {
+                    const car = createCarMesh(carColor);
+                    const startX = (i * 6) - 6;
+                    car.position.set(startX, 0, 0);
+                    if (laneData.speed < 0) car.rotation.y = Math.PI;
+                    laneGroup.add(car);
+                    laneData.obstacles.push({ type: 'CAR', x: startX, mesh: car });
+                }
+            } else if (type === 'WATER') {
+                // 木の板は前の「2本・短め」に戻す。
+                // 数を増やしたり長くせず、流れる速度と当たり判定だけ調整。
+                const logCount = 2;
+                for (let i = 0; i < logCount; i++) {
+                    const log = createLogMesh(2);
+                    const startX = (i * 7) - 6;
+                    log.position.set(startX, 0, 0);
+                    laneGroup.add(log);
+                    laneData.obstacles.push({ type: 'LOG', x: startX, length: 2, mesh: log, speed: laneData.speed });
+                }
+            }
+
+            scene.add(laneGroup);
+            lanes.push(laneData);
+        }
+
+        function openShopModal(modalId) {
+            if (modalId === 'modal-ability') {
+                renderAbilityShopUI();
+            }
+            document.getElementById(modalId).classList.remove('hidden');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+        }
+
+        function buyItem(type, cost) {
+            if (playerPoints < cost) {
+                alert("ポイントが足りません！");
+                return;
+            }
+            playerPoints -= cost;
+            updatePointsUI();
+
+            if (type.startsWith('elem_')) {
+                weaponElement = type.replace('elem_', '');
+                alert(`武器に【${weaponElement.toUpperCase()}】属性を付与しました！`);
+                if (characterMesh) {
+                    playerGroup.remove(characterMesh);
+                    characterMesh = createHeroMesh(selectedClass);
+                    playerGroup.add(characterMesh);
+                }
+            } else if (type === 'shield') {
+                hasShield = true;
+                alert("無敵シールドを獲得しました！");
+            } else if (type === 'speed') {
+                alert("移動速度がアップしました！");
+            }
+        }
+
+        // 能力屋UIの実装（デフォルト能力と購入能力の切替に対応）
+        function renderAbilityShopUI() {
+            const container = document.getElementById('ability-item-container');
+            container.innerHTML = '';
+
+            const cData = ALL_CLASSES[selectedClass] || ALL_CLASSES.warrior;
+            const isUnlocked = unlockedAbilities[selectedClass] || false;
+            const currentEquipped = equippedAbilities[selectedClass] || 'default';
+
+            // 1. デフォルト能力カード
+            const defaultDiv = document.createElement('div');
+            defaultDiv.className = `bg-slate-900 border p-3 rounded-xl flex justify-between items-center ${currentEquipped === 'default' ? 'border-amber-400 bg-amber-950/40' : 'border-slate-700'}`;
+            defaultDiv.innerHTML = `
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-amber-300 text-sm">${cData.defaultAbilityName}</span>
+                        <span class="text-[9px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-600">初期能力</span>
+                    </div>
+                    <div class="text-[10px] text-slate-400">${cData.defaultAbilityDesc}</div>
+                </div>
+                ${currentEquipped === 'default' ? 
+                    '<span class="text-xs text-amber-400 font-black bg-amber-950/80 px-3 py-1 rounded-lg border border-amber-400/50">セット中</span>' : 
+                    `<button onclick="equipAbility('${selectedClass}', 'default')" class="bg-slate-700 hover:bg-slate-600 text-white font-bold px-3 py-1.5 rounded-lg text-xs btn-bounce">装備する</button>`
+                }
+            `;
+            container.appendChild(defaultDiv);
+
+            // 2. ショップ特別能力カード
+            const shopDiv = document.createElement('div');
+            shopDiv.className = `bg-slate-900 border p-3 rounded-xl flex justify-between items-center ${currentEquipped === 'shop' ? 'border-cyan-400 bg-cyan-950/40' : 'border-slate-700'}`;
+            shopDiv.innerHTML = `
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-cyan-300 text-sm">${cData.abilityName}</span>
+                        <span class="text-[9px] bg-cyan-950 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-800">覚醒能力</span>
+                    </div>
+                    <div class="text-[10px] text-slate-400">${cData.abilityDesc}</div>
+                </div>
+                ${isUnlocked ? 
+                    (currentEquipped === 'shop' ? 
+                        '<span class="text-xs text-cyan-400 font-black bg-cyan-950/80 px-3 py-1 rounded-lg border border-cyan-400/50">セット中</span>' : 
+                        `<button onclick="equipAbility('${selectedClass}', 'shop')" class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs btn-bounce">装備する</button>`
+                    ) : 
+                    `<button onclick="buyAbility('${selectedClass}', ${cData.abilityCost || 500})" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-3 py-1.5 rounded-lg text-xs btn-bounce">${cData.abilityCost || 500}Pで解放</button>`
+                }
+            `;
+            container.appendChild(shopDiv);
+        }
+
+        function buyAbility(classId, cost) {
+            if (playerPoints < cost) {
+                alert("ポイントが足りません！");
+                return;
+            }
+            playerPoints -= cost;
+            updatePointsUI();
+            unlockedAbilities[classId] = true;
+            equippedAbilities[classId] = 'shop'; // 購入時は自動装備
+            localStorage.setItem('road_hopper_abilities', JSON.stringify(unlockedAbilities));
+            localStorage.setItem('road_hopper_equipped', JSON.stringify(equippedAbilities));
+            renderAbilityShopUI();
+            alert("パッシブ能力を解放し、装備しました！");
+        }
+
+        function equipAbility(classId, type) {
+            equippedAbilities[classId] = type;
+            localStorage.setItem('road_hopper_equipped', JSON.stringify(equippedAbilities));
+            renderAbilityShopUI();
+        }
+
+        function drawGacha(cost, isRareUp) {
+            if (playerPoints < cost) {
+                alert("ポイントが足りません！");
+                return;
+            }
+            playerPoints -= cost;
+            updatePointsUI();
+
+            const keys = Object.keys(ALL_CLASSES);
+            const pickedKey = keys[Math.floor(Math.random() * keys.length)];
+            const picked = ALL_CLASSES[pickedKey];
+
+            if (!unlockedClasses.includes(pickedKey)) {
+                unlockedClasses.push(pickedKey);
+                localStorage.setItem('road_hopper_unlocked', JSON.stringify(unlockedClasses));
+                alert(`🎉 【${picked.rarity}】${picked.name} を新しく獲得しました！`);
+            } else {
+                playerPoints += 100;
+                updatePointsUI();
+                alert(`重複したため100P返金されました。（獲得: ${picked.name}）`);
+            }
+        }
+
+        function runCinematicIntro() {
+            gameState = 'CINEMATIC';
+            isCameraControlledByAnim = true;
+
+            document.getElementById('screen-title').classList.add('hidden');
+            document.getElementById('story-dialog-container').classList.remove('opacity-0');
+            document.getElementById('btn-skip-intro').classList.remove('hidden');
+
+            resetWorld();
+
+            chinAnagoMesh = createChinAnagoMesh();
+            chinAnagoMesh.position.set(0, 0, -3);
+            scene.add(chinAnagoMesh);
+
+            camTargetPos.set(-2, 1.2, -1.2);
+            camTargetLookAt.set(0, 0.5, -3);
+
+            setTimeout(() => audio.playChinAnagoVoiceHappy(), 800);
+            setDialogue("平穏な日常", "平和な始まりの村で、すくすくと育つチンアナゴ。");
+
+            setTimeout(() => {
+                if (gameState !== 'CINEMATIC') return;
+                audio.playCorrupt();
+                document.getElementById('scanline-overlay').style.display = 'block';
+                setDialogue("突如たる異変！", "空が不吉な紫に染まり、世界の均衡が崩れ始める...！");
+
+                targetBgColor.setHex(0x1a052b);
+                targetFogColor.setHex(0x1a052b);
+                dirLight.color.setHex(0x701a75);
+
+                camTargetPos.set(-5, 6, -1);
+                camTargetLookAt.set(0, 0.5, -3);
+
+                lanes.forEach(lane => {
+                    if (lane.baseMesh) lane.baseMesh.material.color.setHex(COLOR_CORRUPT_VOID);
+                });
+
+                surpriseIconMesh = createBox(0.2, 0.5, 0.2, 0xef4444, 0, 1.3, -3, 0xef4444);
+                scene.add(surpriseIconMesh);
+            }, 3000);
+
+            setTimeout(() => {
+                if (gameState !== 'CINEMATIC') return;
+                setDialogue("大魔王降臨", "天地を揺るがす真紅の光とともに、暗黒魔王が降臨する！");
+                
+                demonGroup = createCoolDemonMesh();
+                demonGroup.position.set(0, 20, -3);
+                scene.add(demonGroup);
+
+                audio.playThunder();
+
+                camTargetPos.set(0.5, 0.8, -0.5);
+                camTargetLookAt.set(0, 5, -3);
+
+                shockwaveRing.material.opacity = 0.95;
+                redParticleSystem.material.opacity = 0.85;
+                demonLight.intensity = 4.0;
+
+                let startTime = Date.now();
+                let dropDuration = 2000;
+
+                let dropAnim = setInterval(() => {
+                    let elapsed = Date.now() - startTime;
+                    let progress = elapsed / dropDuration;
+
+                    if (progress < 1) {
+                        demonGroup.position.y = 20 * Math.pow(1 - progress, 2);
+                        if (demonGroup.wingGroup) {
+                            demonGroup.wingGroup.rotation.y = Math.sin(progress * 18) * 0.5;
+                        }
+                    } else {
+                        demonGroup.position.y = 0;
+                        clearInterval(dropAnim);
+                        audio.playCrash();
+                        triggerFlash();
+                        shockwaveRing.scale.set(4.0, 4.0, 4.0);
+                        triggerCameraShake(0.8, 450);
+                    }
+                }, 16);
+            }, 6000);
+
+            setTimeout(() => {
+                if (gameState !== 'CINEMATIC') return;
+                setDialogue("強奪！", "魔王「フハハハ！この愛くるしいチンアナゴは我のコレクションとする！」");
+                audio.playChinAnagoVoiceShock();
+
+                chinAnagoMesh.position.y = 1.4;
+                chinAnagoMesh.scale.set(0.7, 0.7, 0.7);
+                demonGroup.add(chinAnagoMesh);
+
+                camTargetPos.set(-6, 8, 2);
+                camTargetLookAt.set(0, 4, -3);
+
+                let flyStartTime = Date.now();
+                let flyAnim = setInterval(() => {
+                    let flyElapsed = Date.now() - flyStartTime;
+                    demonGroup.position.y += 0.3;
+                    demonGroup.position.z -= 0.35;
+                    
+                    if (demonGroup.wingGroup) {
+                        demonGroup.wingGroup.rotation.y = Math.sin(flyElapsed * 0.02) * 0.7;
+                    }
+
+                    if (demonGroup.position.y > 20) {
+                        clearInterval(flyAnim);
+                    }
+                }, 20);
+            }, 9500);
+
+            setTimeout(() => {
+                if (gameState !== 'CINEMATIC') return;
+                document.getElementById('scanline-overlay').style.display = 'none';
+                setDialogue("勇者の誓い", "👤「待ってろチンアナゴ！今すぐ助けに行くぞ！」");
+
+                camTargetPos.set(-8, 10, 8);
+                camTargetLookAt.set(0, 0, 0);
+
+                showBanner("MISSION START", "チンアナゴを奪還せよ！");
+            }, 12500);
+
+            setTimeout(() => {
+                if (gameState !== 'CINEMATIC') return;
+                finishCinematic();
+            }, 15500);
+        }
+
+        function showBanner(sub, title) {
+            const banner = document.getElementById('screen-banner');
+            document.getElementById('banner-subtitle').innerText = sub;
+            document.getElementById('banner-title').innerText = title;
+            banner.classList.remove('opacity-0');
+            banner.querySelector('#banner-content').classList.remove('scale-90');
+            banner.querySelector('#banner-content').classList.add('scale-100');
+            setTimeout(() => {
+                banner.classList.add('opacity-0');
+            }, 2500);
+        }
+
+        let shakeIntensity = 0;
+        let shakeDurationTimer = 0;
+        function triggerCameraShake(intensity, durationMs) {
+            shakeIntensity = intensity;
+            shakeDurationTimer = durationMs;
+        }
+
+        function setDialogue(speaker, text) {
+            document.getElementById('story-speaker').innerText = speaker;
+            document.getElementById('story-text').innerText = text;
+        }
+
+        function finishCinematic() {
+            isCameraControlledByAnim = false;
+            document.getElementById('story-dialog-container').classList.add('opacity-0');
+            document.getElementById('screen-banner').classList.add('opacity-0');
+            document.getElementById('btn-skip-intro').classList.add('hidden');
+            
+            if (chinAnagoMesh) scene.remove(chinAnagoMesh);
+            if (demonGroup) scene.remove(demonGroup);
+            if (surpriseIconMesh) scene.remove(surpriseIconMesh);
+            if (magicAuraGroup) scene.remove(magicAuraGroup);
+
+            openClassSelection();
+        }
+
+        function openClassSelection() {
+            gameState = 'CLASS_SELECT';
+            renderClassSelectionUI();
+            document.getElementById('screen-class').classList.remove('hidden');
+        }
+
+        function renderClassSelectionUI() {
+            const container = document.getElementById('class-selection-container');
+            container.innerHTML = '';
+
+            unlockedClasses.forEach(classId => {
+                const cData = ALL_CLASSES[classId];
+                if (!cData) return;
+
+                const card = document.createElement('div');
+                card.className = `class-card bg-slate-900/80 border-2 border-slate-700 hover:border-amber-400 rounded-2xl p-4 flex flex-col items-center text-center cursor-pointer transition transform hover:-translate-y-2 shadow-xl group ${selectedClass === classId ? 'border-amber-400 bg-amber-950/60 scale-105' : ''}`;
+                card.setAttribute('data-class', classId);
+
+                card.innerHTML = `
+                    <div class="w-16 h-16 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-3xl mb-2 border border-amber-500/40 group-hover:scale-110 transition">
+                        <i class="fa-solid ${cData.icon}"></i>
+                    </div>
+                    <div class="text-[10px] font-black ${cData.rarityClass}">${cData.rarity}</div>
+                    <div class="font-black text-lg text-white mb-1">${cData.name}</div>
+                    <div class="text-xs font-black text-amber-400 mb-2">「${cData.skillName}」</div>
+                    <p class="text-[11px] text-slate-300 leading-relaxed">${cData.desc}</p>
+                `;
+
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.class-card').forEach(c => c.classList.remove('border-amber-400', 'bg-amber-950/60', 'scale-105'));
+                    card.classList.add('border-amber-400', 'bg-amber-950/60', 'scale-105');
+                    selectedClass = classId;
+
+                    const btn = document.getElementById('btn-confirm-class');
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                });
+
+                container.appendChild(card);
+            });
+        }
+
+        document.getElementById('btn-confirm-class').addEventListener('click', () => {
+            if (!selectedClass) return;
+            document.getElementById('screen-class').classList.add('hidden');
+            startGameWithClass(selectedClass);
+        });
+
+        function startGameWithClass(className) {
+            gameState = 'PLAYING';
+
+            if (characterMesh) playerGroup.remove(characterMesh);
+            characterMesh = createHeroMesh(className);
+            playerGroup.add(characterMesh);
+
+            const cData = ALL_CLASSES[className] || ALL_CLASSES.warrior;
+            document.getElementById('skill-name-hud').innerText = cData.skillName;
+            document.getElementById('skill-desc-hud').innerText = cData.desc;
+            document.getElementById('skill-icon').className = `fa-solid ${cData.icon} text-3xl mb-1 drop-shadow`;
+
+            document.getElementById('hud-top').classList.remove('opacity-0');
+            document.getElementById('skill-hud').classList.remove('opacity-0');
+            document.getElementById('action-hud').classList.remove('opacity-0');
+            
+            resetWorld();
+            skillCooldown = 0;
+            skillActiveTimer = 0;
+            hasShield = false;
+            isActionAnimActive = false;
+            bossEncountered = { mid: false, gate: false, demon: false };
+        }
+
+        // 全役職固有の必殺技（スキル）分岐処理
+        function triggerSkill() {
+            if (gameState !== 'PLAYING' || skillCooldown > 0) return;
+
+            const cData = ALL_CLASSES[selectedClass] || ALL_CLASSES.warrior;
+            
+            // 魔導の極意・魔力瞑想などのCT短縮アビリティの計算
+            let finalCooldown = cData.cooldown;
+            const activeAbility = equippedAbilities[selectedClass] || 'default';
+            if (activeAbility === 'shop' && selectedClass === 'mage') finalCooldown *= 0.8;
+            if (activeAbility === 'default' && selectedClass === 'archmage') finalCooldown *= 0.85;
+
+            skillCooldown = finalCooldown;
+            audio.playSkill();
+            triggerFlash();
+
+            const px = playerPos.x;
+            const pz = playerPos.z;
+
+            // 1. 戦士 - 剛力覚醒
+            if (selectedClass === 'warrior') {
+                skillActiveTimer = 5.0;
+                playerGroup.scale.set(1.8, 1.8, 1.8);
+                spawnSkillParticleBurst(0xef4444, 40, px, pz);
+                triggerCameraShake(0.6, 400);
+                attemptHop(0, -2);
+            }
+            // 2. 盗賊 - 疾風瞬天
+            else if (selectedClass === 'rogue') {
+                skillActiveTimer = 3.0;
+                spawnSkillParticleBurst(0xa855f7, 30, px, pz);
+                playerPos.z -= 5;
+                targetPos.z = playerPos.z;
+                minZReached = Math.min(minZReached, playerPos.z);
+                currentScore = Math.abs(minZReached);
+                updateScoreUI();
+            }
+            // 3. 僧侶 - 聖域展開
+            else if (selectedClass === 'cleric') {
+                skillActiveTimer = 6.0;
+                hasShield = true;
+                spawnSkillParticleBurst(0x10b981, 40, px, pz);
+            }
+            // 4. 魔法使い - 極大天天隕石
+            else if (selectedClass === 'mage') {
+                const meteorGeo = new THREE.DodecahedronGeometry(1.8, 1);
+                const meteorMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, emissive: 0x1d4ed8 });
+                const meteor = new THREE.Mesh(meteorGeo, meteorMat);
+                meteor.position.set(px, 15, pz - 4);
+                scene.add(meteor);
+
+                let mTime = Date.now();
+                let mAnim = setInterval(() => {
+                    let progress = (Date.now() - mTime) / 600;
+                    if (progress < 1) {
+                        meteor.position.y = 15 * (1 - progress);
+                        meteor.rotation.x += 0.1;
+                    } else {
+                        clearInterval(mAnim);
+                        scene.remove(meteor);
+                        triggerFlash();
+                        audio.playCrash();
+                        triggerCameraShake(0.7, 400);
+                        clearFrontObstacles(px, pz, 3, 10);
+                        if (bossActive && currentBoss) damageBoss(35);
+                        spawnSkillParticleBurst(0x3b82f6, 50, px, pz - 4);
+                    }
+                }, 16);
+            }
+            // 5. 武闘家 - 覇王連撃拳
+            else if (selectedClass === 'monk') {
+                skillActiveTimer = 2.0;
+                spawnSkillParticleBurst(0xf97316, 40, px, pz);
+                clearFrontObstacles(px, pz, 1, 8);
+                attemptHop(0, -3);
+            }
+            // 6. 聖騎士 - ディヴァインクロス
+            else if (selectedClass === 'paladin') {
+                skillActiveTimer = 3.0;
+                hasShield = true;
+                spawnSkillParticleBurst(0x38bdf8, 50, px, pz);
+                clearFrontObstacles(px, pz, 5, 6);
+                zombies.forEach(z => {
+                    if (Math.hypot(z.x-px, z.z-pz) < 5) {
+                        z.x += (z.x-px) * 0.8; z.z += (z.z-pz) * 0.8;
+                        z.mesh.position.set(z.x,0,z.z);
+                    }
+                });
+                if (bossActive && currentBoss) damageBoss(30);
+            }
+            // 7. 暗殺者 - 影潜み
+            else if (selectedClass === 'assassin') {
+                skillActiveTimer = 4.0;
+                spawnSkillParticleBurst(0x4c1d95, 30, px, pz);
+                zombies.forEach(z => { z.attackCooldown += 3.0; });
+                attemptHop(0, -2);
+            }
+            // 8. 精霊使い - エレメンタルブラスト
+            else if (selectedClass === 'elemental') {
+                spawnSkillParticleBurst(0x06b6d4, 40, px, pz - 2);
+                spawnSkillParticleBurst(0xef4444, 40, px, pz - 4);
+                clearFrontObstacles(px, pz, 4, 8);
+                zombies.forEach(z => {
+                    if (Math.hypot(z.x-px,z.z-pz) < 7) z.speed *= 0.25;
+                });
+                if (bossActive && currentBoss) damageBoss(40);
+            }
+            // 9. 狂戦士 - 血風怒濤
+            else if (selectedClass === 'berserker') {
+                skillActiveTimer = 4.0;
+                spawnSkillParticleBurst(0x9f1239, 50, px, pz);
+                attemptHop(0, -4);
+                clearFrontObstacles(px, pz, 2, 6);
+                zombies.forEach(z => { if (Math.hypot(z.x-px,z.z-pz)<6) z.attackCooldown = 0.2; });
+            }
+            // 10. 侍 - 居合一閃・神威
+            else if (selectedClass === 'samurai') {
+                triggerFlash();
+                audio.playParry();
+                clearFrontObstacles(px, pz, 12, 15);
+                zombies.forEach(z => {
+                    if (Math.hypot(z.x-px,z.z-pz)<8) { z.attacking=true; z.attackTimer=0.5; }
+                });
+                if (bossActive && currentBoss) damageBoss(50);
+                spawnSkillParticleBurst(0xe11d48, 60, px, pz - 5);
+            }
+            // 11. 死霊術師 - サモン・アンデッド
+            else if (selectedClass === 'necromancer') {
+                spawnSkillParticleBurst(0x581c87, 40, px, pz);
+                clearFrontObstacles(px, pz, 3, 7);
+                playerPoints += zombies.filter(z => Math.hypot(z.x-px,z.z-pz)<6).length * 25;
+                updatePointsUI();
+            }
+            // 12. 吟遊詩人 - 英雄の賛歌
+            else if (selectedClass === 'bard') {
+                timeScale = 0.3;
+                setTimeout(() => { if (gameState === 'PLAYING' && zombieSlowTimer <= 0) timeScale = 1.0; }, 5000);
+                spawnSkillParticleBurst(0xf59e0b, 35, px, pz);
+            }
+            // 13. 竜騎士 - ドラゴンバースト
+            else if (selectedClass === 'dragon_knight') {
+                spawnSkillParticleBurst(0xbd1e59, 70, px, pz - 3);
+                clearFrontObstacles(px, pz, 5, 9);
+                if (bossActive && currentBoss) damageBoss(55);
+            }
+            // 14. 大賢者 - アルティメットノヴァ
+            else if (selectedClass === 'archmage') {
+                triggerFlash();
+                spawnSkillParticleBurst(0x6366f1, 80, px, pz);
+                clearFrontObstacles(px, pz, 8, 12);
+                if (bossActive && currentBoss) damageBoss(65);
+            }
+            // 15. 伝説の勇者 - ファイナルエクスプロージョン
+            else if (selectedClass === 'hero') {
+                triggerFlash();
+                triggerCameraShake(1.0, 600);
+                clearFrontObstacles(px, pz, 12, 20);
+                clearEnemies();
+                if (bossActive && currentBoss) damageBoss(80);
+                spawnSkillParticleBurst(0xfacc15, 100, px, pz - 5);
+            }
+            // 16. ミミック - 宝箱乱打
+            else if (selectedClass === 'mimic') {
+                playerPoints += 200;
+                updatePointsUI();
+                attemptHop(0, -3);
+                spawnSkillParticleBurst(0xb45309, 50, px, pz);
+            }
+        }
+
+        // 前方障害物消滅ヘルパー関数
+        function clearFrontObstacles(originX, originZ, widthRange, depthRange) {
+            lanes.forEach(lane => {
+                if (lane.z < originZ && lane.z >= originZ - depthRange) {
+                    lane.obstacles = lane.obstacles.filter(obs => {
+                        if (Math.abs(obs.x - originX) <= widthRange) {
+                            if (obs.type === 'LOG') return true;
+                            if (obs.mesh) lane.group.remove(obs.mesh);
+                            return false;
+                        }
+                        return true;
+                    });
+                }
+            });
+        }
+
+        function spawnSkillParticleBurst(colorHex, count = 20, originX = playerPos.x, originZ = playerPos.z) {
+            for (let i = 0; i < count; i++) {
+                const p = createBox(0.15, 0.15, 0.15, colorHex, originX, 0.5, originZ, colorHex);
+                const vel = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.2,
+                    Math.random() * 0.25,
+                    (Math.random() - 0.5) * 0.2
+                );
+                vfxGroup.add(p);
+                auraParticles.push({ mesh: p, vel: vel, life: 1.0 });
+            }
+        }
+
+        function attemptHop(dx, dz) {
+            if (isHopping || gameState !== 'PLAYING') return;
+
+            const nextX = playerPos.x + dx;
+            const nextZ = playerPos.z + dz;
+
+            if (nextX < -Math.floor(GRID_WIDTH/2) || nextX > Math.floor(GRID_WIDTH/2)) return;
+
+            targetPos.x = nextX;
+            targetPos.z = nextZ;
+            isHopping = true;
+            hopProgress = 0;
+
+            audio.playHop();
+
+            let nearestEnemy = null;
+            let minDist = 3.5;
+            zombies.concat(skeletons).forEach(e => {
+                const dist = Math.hypot(e.x - nextX, e.z - nextZ);
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearestEnemy = e;
+                }
+            });
+
+            if (nearestEnemy) {
+                const angle = Math.atan2(nearestEnemy.x - playerPos.x, nearestEnemy.z - playerPos.z);
+                playerGroup.rotation.y = angle;
+            } else {
+                if (dz < 0) playerGroup.rotation.y = 0;
+                if (dz > 0) playerGroup.rotation.y = Math.PI;
+                if (dx < 0) playerGroup.rotation.y = Math.PI / 2;
+                if (dx > 0) playerGroup.rotation.y = -Math.PI / 2;
+            }
+
+            if (nextZ < minZReached) {
+                minZReached = nextZ;
+                currentScore = Math.abs(minZReached);
+                updateScoreUI();
+
+                if (lanes.length > 0) {
+                    const minLaneZ = lanes[lanes.length - 1].z;
+                    createLaneAtIndex(minLaneZ - 1);
+                }
+
+                checkBossTriggers(currentScore);
+            }
+        }
+
+        function checkBossTriggers(score) {
+            if (score >= 50 && !bossEncountered.mid) {
+                bossEncountered.mid = true;
+                spawnBoss('中ボス・ゴーレム', 120);
+            } else if (score >= 120 && !bossEncountered.gate) {
+                bossEncountered.gate = true;
+                spawnBoss('ゲートキーパー・ヘルハウンド', 180);
+            } else if (score >= 200 && !bossEncountered.demon) {
+                bossEncountered.demon = true;
+                spawnBoss('暗黒魔王', 250);
+            }
+        }
+
+        function spawnBoss(name, hp) {
+            bossActive = true;
+            bossHp = hp;
+            bossMaxHp = hp;
+
+            document.getElementById('boss-name').innerText = name;
+            document.getElementById('boss-hp-container').classList.remove('hidden');
+            document.getElementById('boss-hp-bar').style.width = '100%';
+
+            showBanner("WARNING!", `${name} が出現！`);
+
+            const bMesh = createCoolDemonMesh();
+            bMesh.position.set(0, 0, playerPos.z - 8);
+            scene.add(bMesh);
+
+            currentBoss = {
+                mesh: bMesh,
+                name: name,
+                type: name.includes('ゴーレム') ? 'golem' : (name.includes('ヘルハウンド') ? 'hound' : 'demon'),
+                z: playerPos.z - 8
+            };
+            bossAttackTimer = 0.8;
+            bossAbilityTimer = 3.5;
+
+            targetBgColor.setHex(0x450a0a);
+            targetFogColor.setHex(0x450a0a);
+        }
+
+        // ボスの青玉・赤玉攻撃
+        // 青玉は80%でFパリィ可能。赤玉は20%でパリィ不可。
+        function createBossProjectile(canParry, x, z, vx, vz) {
+            const color = canParry ? 0x38bdf8 : 0xef4444;
+            const mesh = createBox(0.34, 0.34, 0.34, color, 0, 0.25, 0, color);
+            mesh.position.set(x, 0.62, z);
+            scene.add(mesh);
+            bossBullets.push({
+                mesh, x, z, vx, vz,
+                canParry,
+                reflected: false,
+                life: 8,
+                damage: canParry ? 1 : 1.5
+            });
+        }
+
+        function fireBossVolley() {
+            if (!bossActive || !currentBoss || !currentBoss.mesh) return;
+            const sx = currentBoss.mesh.position.x;
+            const sz = currentBoss.mesh.position.z + 0.8;
+            const dx = playerPos.x - sx;
+            const dz = playerPos.z - sz;
+            const len = Math.max(0.001, Math.hypot(dx, dz));
+            const nx = dx / len;
+            const nz = dz / len;
+            const speed = 0.075;
+            const canParry = Math.random() < 0.8;
+
+            if (currentBoss.type === 'hound') {
+                // ヘルハウンドは3方向へ散弾
+                for (const spread of [-0.22, 0, 0.22]) {
+                    const c = Math.cos(spread), si = Math.sin(spread);
+                    createBossProjectile(canParry, sx, sz, (nx*c - nz*si)*speed, (nx*si + nz*c)*speed);
+                }
+            } else if (currentBoss.type === 'demon') {
+                // 暗黒魔王は青玉2発＋赤玉1発の混合攻撃
+                createBossProjectile(true, sx, sz, nx*speed, nz*speed);
+                createBossProjectile(true, sx, sz, (nx*0.94 - nz*0.18)*speed, (nx*0.18 + nz*0.94)*speed);
+                createBossProjectile(false, sx, sz, (nx*0.94 + nz*0.18)*speed, (-nx*0.18 + nz*0.94)*speed);
+            } else {
+                // ゴーレムは単発だが少し大きく見える青玉/赤玉
+                createBossProjectile(canParry, sx, sz, nx*speed*0.85, nz*speed*0.85);
+            }
+        }
+
+        function updateBossProjectiles(delta) {
+            if (gameState !== 'PLAYING') return;
+            if (!bossActive || !currentBoss || !currentBoss.mesh) return;
+            const dt = Math.min(delta, 0.05) * timeScale;
+
+            bossAttackTimer -= delta;
+            if (bossAttackTimer <= 0) {
+                fireBossVolley();
+                bossAttackTimer = currentBoss.type === 'hound' ? 2.0 : (currentBoss.type === 'demon' ? 1.65 : 2.35);
+            }
+
+            bossAbilityTimer -= delta;
+            if (bossAbilityTimer <= 0) {
+                // ボスごとの特殊能力
+                if (currentBoss.type === 'golem') {
+                    // ゴーレム：短い衝撃波。近距離にいるとシールドを削る
+                    if (Math.abs(playerPos.z - currentBoss.mesh.position.z) < 3.2 && Math.abs(playerPos.x - currentBoss.mesh.position.x) < 2.6 && skillActiveTimer <= 0) {
+                        if (hasShield) hasShield = false;
+                        else { gameOver('ゴーレムの衝撃波を受けてしまった！'); return; }
+                        triggerFlash();
+                    }
+                    bossAbilityTimer = 5.5;
+                } else if (currentBoss.type === 'hound') {
+                    // ヘルハウンド：左右へ高速移動してから連射
+                    currentBoss.mesh.position.x = THREE.MathUtils.clamp(playerPos.x + (Math.random() < 0.5 ? -2.5 : 2.5), -5.5, 5.5);
+                    bossAbilityTimer = 4.5;
+                } else {
+                    // 暗黒魔王：追加の赤玉を1発だけ発射
+                    const sx = currentBoss.mesh.position.x;
+                    const sz = currentBoss.mesh.position.z + 0.8;
+                    const dx = playerPos.x - sx, dz = playerPos.z - sz;
+                    const len = Math.max(0.001, Math.hypot(dx, dz));
+                    createBossProjectile(false, sx, sz, dx/len*0.095, dz/len*0.095);
+                    bossAbilityTimer = 3.8;
+                }
+            }
+
+            for (let i = bossBullets.length - 1; i >= 0; i--) {
+                const b = bossBullets[i];
+                if (!b || !b.mesh) { bossBullets.splice(i, 1); continue; }
+                b.life -= delta;
+                b.x += b.vx * 60 * dt;
+                b.z += b.vz * 60 * dt;
+                b.mesh.position.set(b.x, 0.62 + Math.sin((8-b.life)*8)*0.06, b.z);
+                b.mesh.rotation.x += dt * 5;
+                b.mesh.rotation.y += dt * 7;
+
+                if (b.reflected && Math.hypot(b.x-currentBoss.mesh.position.x, b.z-currentBoss.mesh.position.z) < 1.25) {
+                    damageBoss(b.damage || 25);
+                    scene.remove(b.mesh); bossBullets.splice(i, 1); continue;
+                }
+                if (!b.reflected && Math.hypot(b.x-playerPos.x, b.z-playerPos.z) < 0.82) {
+                    scene.remove(b.mesh); bossBullets.splice(i, 1);
+                    if (b.canParry) {
+                        // 青玉はFを押すまで残るが、接触時には軽く弾かれる
+                        if (hasShield) hasShield = false;
+                        else { gameOver('青い球に当たってしまった！'); return; }
+                    } else {
+                        if (hasShield) hasShield = false;
+                        else { gameOver('赤い球に当たってしまった！'); return; }
+                    }
+                    triggerFlash();
+                    continue;
+                }
+                if (b.life <= 0 || Math.abs(b.x-playerPos.x) > 18 || Math.abs(b.z-playerPos.z) > 24) {
+                    scene.remove(b.mesh); bossBullets.splice(i, 1);
+                }
+            }
+        }
+
+        function damageBoss(amount) {
+            if (!bossActive || !currentBoss) return;
+
+            bossHp -= amount;
+            if (bossHp < 0) bossHp = 0;
+
+            const pct = (bossHp / bossMaxHp) * 100;
+            document.getElementById('boss-hp-bar').style.width = `${pct}%`;
+
+            triggerFlash();
+
+            if (bossHp <= 0) {
+                bossActive = false;
+                document.getElementById('boss-hp-container').classList.add('hidden');
+                document.getElementById('boss-stun-text').classList.add('hidden');
+                scene.remove(currentBoss.mesh);
+                currentBoss = null;
+
+                targetBgColor.setHex(0x87ceeb);
+                targetFogColor.setHex(0x87ceeb);
+
+                playerPoints += 300;
+                updatePointsUI();
+                showBanner("VICTORY!", "ボスを撃破した！ (+300P)");
+                addCombo();
+            }
+        }
+
+        function addCombo() {
+            comboCount++;
+            comboTimer = 3.0;
+            updateComboUI();
+        }
+
+        function updateComboUI() {
+            const container = document.getElementById('combo-container');
+            if (comboCount > 1) {
+                container.classList.remove('hidden');
+                document.getElementById('combo-count').innerText = comboCount;
+                const mult = (1.0 + (comboCount - 1) * 0.2).toFixed(1);
+                document.getElementById('combo-multiplier').innerText = `x${mult}`;
+            } else {
+                container.classList.add('hidden');
+            }
+        }
+
+        function triggerParryOrAttack() {
+            if (gameState !== 'PLAYING' || isActionAnimActive) return;
+
+            isActionAnimActive = true;
+            actionAnimTimer = 0.25;
+
+            if (weaponElement === 'fire') {
+                attackSlashTrail.material.color.setHex(0xef4444);
+                spawnSkillParticleBurst(0xef4444, 15);
+            } else if (weaponElement === 'ice') {
+                attackSlashTrail.material.color.setHex(0x06b6d4);
+                spawnSkillParticleBurst(0x06b6d4, 15);
+            } else if (weaponElement === 'thunder') {
+                attackSlashTrail.material.color.setHex(0xeab308);
+                spawnSkillParticleBurst(0xeab308, 15);
+            } else {
+                attackSlashTrail.material.color.setHex(0xfacc15);
+            }
+            attackSlashTrail.material.opacity = 0.9;
+
+            const slashDistance = 2.25;
+            let defeated = false;
+
+            // ゾンビィはFで倒せる。攻撃モーション中なら「パリィ成功」としてPを大きく獲得。
+            for (let i = zombies.length - 1; i >= 0; i--) {
+                const z = zombies[i];
+                if (z.dead) continue;
+                const dist = Math.hypot(z.x - playerPos.x, z.z - playerPos.z);
+                if (dist > slashDistance) continue;
+
+                const duringSlow = z.attacking && zombieSlowTimer > 0;
+                const baseP = duringSlow ? 100 : 50;
+                let gain = baseP;
+
+                if (equippedAbilities[selectedClass] === 'shop' && selectedClass === 'assassin' && duringSlow) gain = Math.floor(gain * 1.5);
+                if (equippedAbilities[selectedClass] === 'shop' && selectedClass === 'necromancer') gain += 25;
+                if (equippedAbilities[selectedClass] === 'shop' && selectedClass === 'hero') gain *= 2;
+                if (equippedAbilities[selectedClass] === 'shop' && selectedClass === 'elemental') skillCooldown = Math.max(0, skillCooldown - 2);
+
+                scene.remove(z.mesh);
+
+                // ゾンビ撃破時は黄色・水色のブロックを出さず、その場でPを獲得する。
+                playerPoints += gain;
+                updatePointsUI();
+
+                zombies.splice(i, 1);
+                addCombo();
+                audio.playParry();
+                triggerFlash();
+                defeated = true;
+
+                if (duringSlow) {
+                    // 撃破タイトルは表示しない（画面のプレイ感を優先）
+                }
+            }
+
+            // 骸骨・ボスは従来のF攻撃を維持
+            for (let i = skeletons.length - 1; i >= 0; i--) {
+                const sk = skeletons[i];
+                if (Math.hypot(sk.x - playerPos.x, sk.z - playerPos.z) < slashDistance) {
+                    scene.remove(sk.mesh);
+                    skeletons.splice(i, 1);
+                    audio.playCrash();
+                    addCombo();
+                }
+            }
+
+            // 青いボス玉だけ、タイミングよくFを押すとボスへ反射できる。赤玉は反射不可。
+            if (bossActive && currentBoss) {
+                for (let i = bossBullets.length - 1; i >= 0; i--) {
+                    const b = bossBullets[i];
+                    if (!b || b.reflected || !b.canParry) continue;
+                    if (Math.hypot(b.x - playerPos.x, b.z - playerPos.z) < 1.75) {
+                        const dx = currentBoss.mesh.position.x - b.x;
+                        const dz = currentBoss.mesh.position.z - b.z;
+                        const len = Math.max(0.001, Math.hypot(dx, dz));
+                        b.vx = dx / len * 0.12;
+                        b.vz = dz / len * 0.12;
+                        b.reflected = true;
+                        b.damage = 30;
+                        b.mesh.material.color.setHex(0xfacc15);
+                        if (b.mesh.material.emissive) b.mesh.material.emissive.setHex(0xfacc15);
+                        audio.playParry();
+                        triggerFlash();
+                        addCombo();
+                    }
+                }
+            }
+
+            if (bossActive && currentBoss &&
+                Math.hypot(currentBoss.mesh.position.x - playerPos.x, currentBoss.mesh.position.z - playerPos.z) < 3.5) {
+                damageBoss(20);
+                audio.playCrash();
+            }
+        }
+
+        // ゾンビィAI：
+        // 道端に出現した後、プレイヤーへ向かって徐々に接近。
+        // 攻撃直前だけ時間をスローにし、その瞬間にFでパリィ撃破できる。
+        function updateZombies(delta) {
+            if (gameState !== 'PLAYING') return;
+
+            const dt = Math.min(delta, 0.05);
+
+            if (zombieSlowTimer > 0) {
+                zombieSlowTimer -= dt;
+                if (zombieSlowTimer <= 0) {
+                    zombieSlowTimer = 0;
+                    timeScale = 1.0;
+                    zombieAttackTarget = null;
+                    document.getElementById('parry-overlay').style.opacity = '0';
+                }
+            }
+
+            for (let i = zombies.length - 1; i >= 0; i--) {
+                const z = zombies[i];
+                if (!z || z.dead || !z.mesh) continue;
+
+                // プレイヤーとの距離
+                const dx = playerPos.x - z.x;
+                const dz = playerPos.z - z.z;
+                const dist = Math.hypot(dx, dz);
+
+                if (!z.attacking) {
+                    // プレイヤーへ向かう。近づきすぎたら攻撃準備へ。
+                    if (dist > 1.15) {
+                        const len = Math.max(0.001, dist);
+                        const move = z.speed * 60 * dt * timeScale;
+                        z.x += (dx / len) * move;
+                        z.z += (dz / len) * move;
+                        z.mesh.position.x = z.x;
+                        z.mesh.position.z = z.z;
+                        z.mesh.rotation.y = Math.atan2(dx, dz);
+                    }
+
+                    z.attackCooldown -= dt;
+                    if (dist <= 1.65 && z.attackCooldown <= 0) {
+                        z.attacking = true;
+                        z.attackTimer = 1.0;
+                        zombieAttackTarget = z;
+                        zombieSlowTimer = 0.5;
+                        timeScale = 0.28;
+
+                        document.getElementById('parry-overlay').style.opacity = '1';
+                        document.getElementById('action-text').innerText = 'ゾンビィをパリィ！ [F]';
+                        audio.playParry();
+                    }
+                } else {
+                    z.attackTimer -= dt;
+                    // 攻撃モーション：腕を振り上げる
+                    z.mesh.rotation.y += 0.02;
+                    z.mesh.position.y = 0.08 + Math.sin((1.0 - Math.max(z.attackTimer,0)) * Math.PI) * 0.18;
+
+                    if (z.attackTimer <= 0) {
+                        // Fを押さずに攻撃を受けた
+                        const distNow = Math.hypot(z.x - playerPos.x, z.z - playerPos.z);
+                        if (distNow <= 2.0 && skillActiveTimer <= 0) {
+                            if (hasShield) {
+                                hasShield = false;
+                                triggerFlash();
+                            } else {
+                                gameOver("ゾンビィに殴られてしまった！");
+                                return;
+                            }
+                        }
+                        z.attacking = false;
+                        z.attackCooldown = 1.5 + Math.random() * 2.0;
+                        z.mesh.position.y = 0;
+                    }
+                }
+            }
+
+            // Fが通常時でも近距離のゾンビィを倒せるようにする。
+            // 攻撃スロー中は上の処理で特別なパリィ報酬になる。
+            if (zombieAttackTarget && !zombieAttackTarget.attacking && zombieSlowTimer <= 0) {
+                zombieAttackTarget = null;
+            }
+        }
+
+        // ゾンビ由来のドロップ/VFXは、プレイヤーが近づくと即座に消す。
+        // 黄色・水色などの小さなブロックが残り続けないよう、実体(VFX/オーブ)の両方を掃除する。
+        function clearZombieDropsNearPlayer() {
+            if (gameState !== 'PLAYING') return;
+
+            const DROP_CLEAR_DISTANCE = 3.2;
+
+            // 旧方式のポイントオーブも確実に消す
+            for (let i = pointOrbs.length - 1; i >= 0; i--) {
+                const orb = pointOrbs[i];
+                if (!orb || !orb.mesh) {
+                    pointOrbs.splice(i, 1);
+                    continue;
+                }
+                const dist = Math.hypot(orb.mesh.position.x - playerPos.x, orb.mesh.position.z - playerPos.z);
+                if (dist <= DROP_CLEAR_DISTANCE) {
+                    scene.remove(orb.mesh);
+                    pointOrbs.splice(i, 1);
+                }
+            }
+
+            // ゾンビ撃破時などに出る小ブロックVFXも近づけば消す
+            for (let i = auraParticles.length - 1; i >= 0; i--) {
+                const p = auraParticles[i];
+                if (!p || !p.mesh) {
+                    auraParticles.splice(i, 1);
+                    continue;
+                }
+                const dist = Math.hypot(p.mesh.position.x - playerPos.x, p.mesh.position.z - playerPos.z);
+                if (dist <= DROP_CLEAR_DISTANCE) {
+                    vfxGroup.remove(p.mesh);
+                    auraParticles.splice(i, 1);
+                }
+            }
+        }
+
+        // 黄色の経験値オーブ：近づくとプレイヤーへ吸い寄せられ、接触するとPを獲得
+        function updatePointOrbs(delta) {
+            if (gameState !== 'PLAYING') return;
+
+            for (let i = pointOrbs.length - 1; i >= 0; i--) {
+                const orb = pointOrbs[i];
+                if (!orb || !orb.mesh) continue;
+
+                orb.life -= delta;
+                orb.bob += delta * 5.0;
+                orb.mesh.position.y = 0.28 + Math.sin(orb.bob) * 0.10;
+                orb.mesh.rotation.y += delta * 4.0;
+                orb.mesh.rotation.x += delta * 2.0;
+
+                // メッシュ位置を正として同期。
+                // ゾンビ撃破地点から出た黄色Pも確実にプレイヤーへ吸着させる。
+                orb.x = orb.mesh.position.x;
+                orb.z = orb.mesh.position.z;
+
+                let dx = playerPos.x - orb.x;
+                let dz = playerPos.z - orb.z;
+                let dist = Math.hypot(dx, dz);
+
+                // 吸引範囲を広めにして、画面上で近づけば自然に吸われる。
+                if (dist < 9.0) {
+                    const len = Math.max(0.001, dist);
+                    const pull = Math.min(0.55, (9.0 - dist) * delta * 4.5 + 0.12);
+                    orb.x += (dx / len) * pull;
+                    orb.z += (dz / len) * pull;
+                    orb.mesh.position.x = orb.x;
+                    orb.mesh.position.z = orb.z;
+
+                    // 移動後の距離でも判定する
+                    dx = playerPos.x - orb.x;
+                    dz = playerPos.z - orb.z;
+                    dist = Math.hypot(dx, dz);
+                }
+
+                // かなり近ければ吸着完了として即P獲得
+                if (dist < 1.05) {
+                    const gain = orb.value || 50;
+                    playerPoints += gain;
+                    updatePointsUI();
+                    audio.playParry();
+                    triggerFlash();
+                    spawnSkillParticleBurst(0xfacc15, 10, orb.x, orb.z);
+                    scene.remove(orb.mesh);
+                    pointOrbs.splice(i, 1);
+                    continue;
+                }
+
+                // 取り忘れても一定時間で消える
+                if (orb.life <= 0) {
+                    scene.remove(orb.mesh);
+                    pointOrbs.splice(i, 1);
+                }
+            }
+        }
+
+        function updateScoreUI() {
+            document.getElementById('score-val').innerText = currentScore;
+            document.getElementById('best-score-val').innerText = Math.max(currentScore, bestScore);
+
+            if (currentScore > bestScore) {
+                bestScore = currentScore;
+                localStorage.setItem('road_hopper_best', bestScore);
+            }
+        }
+
+        function gameOver(reason) {
+            if (gameState === 'GAMEOVER') return;
+            gameState = 'GAMEOVER';
+
+            audio.playCrash();
+            document.getElementById('cause-of-death').innerText = reason;
+            document.getElementById('final-score').innerText = currentScore;
+
+            let comboBonus = 1.0 + Math.max(0, (comboCount - 1) * 0.2);
+            let earnedP = Math.floor((currentScore * 2) * comboBonus);
+
+            document.getElementById('earned-points').innerText = earnedP;
+
+            playerPoints += earnedP;
+            updatePointsUI();
+
+            document.getElementById('screen-gameover').classList.remove('hidden');
+        }
+
+        function updateShopUIOverlay() {
+            if (gameState !== 'PLAYING') return;
+
+            const tempV = new THREE.Vector3();
+
+            shopTargets.forEach(s => {
+                const el = document.getElementById(s.labelId);
+                if (!el) return;
+
+                const dist = Math.hypot(playerPos.x - s.x, playerPos.z - s.z);
+
+                if (dist < 1.8) {
+                    tempV.set(s.x, 2.2, s.z);
+                    tempV.project(camera);
+
+                    const x = (tempV.x * .5 + .5) * window.innerWidth;
+                    const y = (-(tempV.y * .5) + .5) * window.innerHeight;
+
+                    el.style.left = `${x}px`;
+                    el.style.top = `${y}px`;
+                    el.classList.add('active');
+                } else {
+                    el.classList.remove('active');
+                }
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const frameDelta = 0.016;
+
+            scene.background.lerp(targetBgColor, 0.05);
+            scene.fog.color.lerp(targetFogColor, 0.05);
+
+            // スキールクールダウン更新
+            if (skillCooldown > 0) {
+                skillCooldown -= 0.016 * timeScale;
+                if (skillCooldown <= 0) skillCooldown = 0;
+                const cdOverlay = document.getElementById('skill-cooldown-overlay');
+                if (skillCooldown > 0) {
+                    cdOverlay.classList.remove('hidden');
+                    document.getElementById('cooldown-timer').innerText = Math.ceil(skillCooldown);
+                } else {
+                    cdOverlay.classList.add('hidden');
+                }
+            }
+
+            if (skillActiveTimer > 0) {
+                skillActiveTimer -= 0.016 * timeScale;
+                if (skillActiveTimer <= 0) {
+                    skillActiveTimer = 0;
+                    if (playerGroup) playerGroup.scale.set(1, 1, 1);
+                }
+            }
+
+            // ホップ補間移動アニメーション
+            if (isHopping) {
+                hopProgress += 0.15 * timeScale;
+                if (hopProgress >= 1) {
+                    hopProgress = 1;
+                    isHopping = false;
+                    playerPos.x = targetPos.x;
+                    playerPos.z = targetPos.z;
+                }
+                const currentX = THREE.MathUtils.lerp(playerGroup.position.x, targetPos.x, hopProgress);
+                const currentZ = THREE.MathUtils.lerp(playerGroup.position.z, targetPos.z, hopProgress);
+                const jumpY = Math.sin(hopProgress * Math.PI) * 0.5;
+
+                playerGroup.position.set(currentX, jumpY, currentZ);
+            }
+
+            // 攻撃軌跡消去
+            if (isActionAnimActive) {
+                actionAnimTimer -= 0.016;
+                if (actionAnimTimer <= 0) {
+                    isActionAnimActive = false;
+                    if (attackSlashTrail) attackSlashTrail.material.opacity = 0;
+                }
+            }
+
+            // ゾンビィAI更新
+            updateZombies(frameDelta);
+            updateBossProjectiles(frameDelta);
+
+            // 黄色の経験値オーブをプレイヤーへ吸収
+            updatePointOrbs(frameDelta);
+
+            // ゾンビから出たものは、プレイヤーが近づいたらすべて消す
+            clearZombieDropsNearPlayer();
+
+            // レーン障害物の更新
+            lanes.forEach(lane => {
+                if (lane.type === 'ROAD' || lane.type === 'WATER') {
+                    lane.obstacles.forEach(obs => {
+                        obs.mesh.position.x += lane.speed * timeScale;
+                        obs.x = obs.mesh.position.x;
+
+                        if (obs.mesh.position.x > GRID_WIDTH / 2 + 2) {
+                            obs.mesh.position.x = -GRID_WIDTH / 2 - 2;
+                        } else if (obs.mesh.position.x < -GRID_WIDTH / 2 - 2) {
+                            obs.mesh.position.x = GRID_WIDTH / 2 + 2;
+                        }
+
+                        // プレイヤーとの当たり判定
+                        if (gameState === 'PLAYING' && Math.round(playerPos.z) === lane.z && skillActiveTimer <= 0) {
+                            if (lane.type === 'ROAD' && Math.abs(obs.x - playerPos.x) < 0.7) {
+                                if (hasShield) {
+                                    hasShield = false;
+                                    triggerFlash();
+                                    obs.x = -999;
+                                } else {
+                                    gameOver("車にはねられてしまった！");
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+
+            // 水没判定
+            if (gameState === 'PLAYING' && !isHopping && skillActiveTimer <= 0) {
+                const currentLane = lanes.find(l => l.z === Math.round(playerPos.z));
+                if (currentLane && currentLane.type === 'WATER') {
+                    let onLog = false;
+                    currentLane.obstacles.forEach(obs => {
+                        if (obs.type === 'LOG' && Math.abs(obs.x - playerPos.x) < 1.15) {
+                            onLog = true;
+                            playerPos.x += obs.speed * timeScale;
+                            targetPos.x = playerPos.x;
+                            playerGroup.position.x = playerPos.x;
+                        }
+                    });
+                    if (!onLog) {
+                        if (hasShield) {
+                            hasShield = false;
+                            triggerFlash();
+                            playerPos.z += 1;
+                            targetPos.z = playerPos.z;
+                        } else {
+                            gameOver("川に落ちておぼれてしまった！");
+                        }
+                    }
+                }
+            }
+
+            // カメラ位置更新
+            if (!isCameraControlledByAnim) {
+                camTargetPos.set(playerPos.x - 10, 12, playerPos.z + 10);
+                camTargetLookAt.set(playerPos.x, 0, playerPos.z);
+
+                if (shakeDurationTimer > 0) {
+                    shakeDurationTimer -= 16;
+                    camTargetPos.x += (Math.random() - 0.5) * shakeIntensity;
+                    camTargetPos.y += (Math.random() - 0.5) * shakeIntensity;
+                }
+
+                camera.position.lerp(camTargetPos, 0.1);
+                currentCamLookAt.lerp(camTargetLookAt, 0.1);
+                camera.lookAt(currentCamLookAt);
+            } else {
+                camera.position.lerp(camTargetPos, 0.05);
+                currentCamLookAt.lerp(camTargetLookAt, 0.05);
+                camera.lookAt(currentCamLookAt);
+            }
+
+            updateShopUIOverlay();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = initEngine;
+    </script>
+</body>
+</html>
